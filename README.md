@@ -2,6 +2,18 @@
 
 Zoom 스타일 화상회의 웹앱 — Django + WebRTC + AI 법률·세무 자문
 
+## 배포 · 저장소 (해커톤 제출)
+
+| 항목 | URL |
+|------|-----|
+| **Live Demo** | https://3-34-197-18.sslip.io |
+| **GitHub (FE / BE)** | https://github.com/KIMHYUNWOO313/lion-hack |
+| **브랜치** | `main` |
+| **AI 코드** | 동일 레포 (`meetings/legal_service.py`, `legal_risk_service.py`, `stt_service.py`) |
+
+> 단일 레포(monorepo) 구조: Django 백엔드 + Vanilla JS 프론트(`static/`, `templates/`)  
+> FE·BE 제출 시 **동일 GitHub URL**을 입력하세요. AI 별도 레포는 없습니다.
+
 ## 기능
 
 - **HD 화상회의**: WebRTC P2P 메시 토폴로지 (영상/음성)
