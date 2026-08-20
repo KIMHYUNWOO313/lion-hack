@@ -6,9 +6,12 @@ import urllib.request
 
 from django.conf import settings
 
+from .legal_countries import country_label
+
 logger = logging.getLogger(__name__)
 
 RISK_SYSTEM = """당신은 회의 음성 전사에서 법률·컴플라이언스·공정거래·세무 리스크를 실시간 탐지하는 AI입니다.
+복수 관할(우리 국가 + 상대 국가들)을 모두 고려해 교차 규제·충돌 리스크를 분석하세요.
 
 다음 발언에서 위험 신호를 JSON으로만 응답하세요:
 {
@@ -43,12 +46,16 @@ async def detect_legal_risk(
         return None
 
     model = getattr(settings, "RISK_MODEL", "gpt-5.6-terra")
-    partners = ", ".join(partner_countries or []) or "미지정"
+    my_label = f"{country_label(my_country)} ({my_country})"
+    partner_labels = [
+        f"{country_label(c)} ({c})" for c in (partner_countries or []) if c
+    ]
+    partners = ", ".join(partner_labels) or "미지정"
 
     user_msg = (
         f"발화자: {speaker}\n"
-        f"우리 관할: {my_country}\n"
-        f"상대 관할: {partners}\n"
+        f"우리 관할: {my_label}\n"
+        f"상대 관할 ({len(partner_labels)}개국): {partners}\n"
         f"미팅 맥락: {meeting_context or '없음'}\n"
         f"전사 내용: {text[:1500]}"
     )

@@ -112,6 +112,7 @@
               <span class="zm-risk-live-dot" id="stt-status-dot"></span>
               <span id="stt-status-text">음성 인식 대기</span>
             </div>
+            <p class="zm-risk-mechanism-hint">마이크 → STT 전사 → AI 법률 리스크 분석 (확정 발언만 탐지)</p>
             <section class="zm-risk-section zm-script-section">
               <h3 class="zm-risk-section-title">실시간 전체 스크립트</h3>
               <ul id="speech-feed" class="zm-speech-feed">
@@ -148,6 +149,13 @@
                 <li class="zm-risk-basis-empty">법률 리스크 근거가 표시됩니다</li>
               </ul>
             </section>
+            <section id="risk-alternatives-section" class="zm-risk-section hidden">
+              <h3 class="zm-risk-section-title">합법적 차선책</h3>
+              <p class="zm-risk-alt-intro">리스크가 탐지되면 법률 위반이 아닌 대안을 AI가 제안합니다.</p>
+              <button id="risk-alternatives-btn" class="zm-btn-legal-quick" type="button">차선책 제안 받기</button>
+              <div id="risk-alternatives-loading" class="zm-risk-alt-loading hidden">차선책 분석 중…</div>
+              <div id="risk-alternatives-list" class="zm-risk-alternatives"></div>
+            </section>
           </div>
         </div>
         <div id="tab-chat" class="zm-tab-panel">
@@ -172,12 +180,10 @@
                 <label class="zm-label" for="legal-my-country">우리 국가</label>
                 <select id="legal-my-country" class="zm-select zm-select-sm"></select>
               </div>
-              <div class="zm-legal-field">
-                <label class="zm-label" for="legal-partner-country">상대 국가</label>
-                <select id="legal-partner-country" class="zm-select zm-select-sm">
-                  <option value="">선택</option>
-                </select>
-              </div>
+            </div>
+            <div class="zm-legal-field zm-legal-field-wide">
+              <label class="zm-label">상대 국가 (복수 선택, 최대 8개)</label>
+              <div id="legal-partner-countries" class="zm-country-checkboxes"></div>
             </div>
             <input type="text" id="legal-context" class="zm-legal-context-input" maxlength="1000" placeholder="미팅 맥락 (선택) — 예: 미국 SaaS B2B 계약 협상">
             <button id="legal-quick-check" class="zm-btn-legal-quick" type="button">리스크 점검</button>

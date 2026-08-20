@@ -44,11 +44,28 @@
   const WAVEFORM_MAX = 120;
   let lastRiskWindow = null;
   let myCountry = localStorage.getItem("lionmeet_my_country") || "KR";
-  let partnerCountry = localStorage.getItem("lionmeet_partner_country") || "";
+
+  function loadPartnerCountries() {
+    const stored = localStorage.getItem("lionmeet_partner_countries");
+    if (stored) {
+      try {
+        const arr = JSON.parse(stored);
+        if (Array.isArray(arr)) return arr.filter(Boolean).slice(0, 8);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    const legacy = localStorage.getItem("lionmeet_partner_country");
+    return legacy ? [legacy] : [];
+  }
+
+  let partnerCountries = loadPartnerCountries();
   let meetingContext = localStorage.getItem("lionmeet_meeting_context") || "";
   let legalHistory = [];
   let legalBusy = false;
   let legalUiInitialized = false;
+  let lastDetectedRisk = null;
+  let alternativesBusy = false;
   let meetingRecorder = null;
   let recordingSessionId = null;
 
@@ -305,6 +322,14 @@
 
       case "risk-detected":
         handleRiskDetected(data);
+        break;
+
+      case "legal-alternatives-typing":
+        setAlternativesLoading(!!data.active);
+        break;
+
+      case "legal-alternatives-response":
+        handleLegalAlternativesResponse(data);
         break;
 
       case "participant-joined":
@@ -707,6 +732,7 @@
     $("#legal-send-btn")?.addEventListener("click", sendLegalQuery);
     bindEnterToSend($("#legal-input"), sendLegalQuery);
     $("#legal-quick-check")?.addEventListener("click", runLegalQuickCheck);
+    $("#risk-alternatives-btn")?.addEventListener("click", requestLegalAlternatives);
   }
 
   function applyDrawerWidth() {
@@ -1014,9 +1040,8 @@
 
   function initLegalUI() {
     const mySelect = $("#legal-my-country");
-    const partnerSelect = $("#legal-partner-country");
     const contextEl = $("#legal-context");
-    if (!mySelect || !partnerSelect) return;
+    if (!mySelect) return;
 
     mySelect.innerHTML = "";
     legalCountries.forEach((c) => {
@@ -1027,7 +1052,8 @@
       mySelect.appendChild(opt);
     });
 
-    renderPartnerCountrySelect();
+    partnerCountries = partnerCountries.filter((c) => c !== myCountry).slice(0, 8);
+    renderPartnerCountryCheckboxes();
 
     if (contextEl) contextEl.value = meetingContext;
 
@@ -1036,17 +1062,9 @@
       mySelect.addEventListener("change", () => {
         myCountry = mySelect.value;
         localStorage.setItem("lionmeet_my_country", myCountry);
-        if (partnerCountry === myCountry) {
-          partnerCountry = "";
-          localStorage.setItem("lionmeet_partner_country", "");
-        }
-        renderPartnerCountrySelect();
-        syncLegalSettings();
-      });
-
-      partnerSelect.addEventListener("change", () => {
-        partnerCountry = partnerSelect.value;
-        localStorage.setItem("lionmeet_partner_country", partnerCountry);
+        partnerCountries = partnerCountries.filter((c) => c !== myCountry);
+        localStorage.setItem("lionmeet_partner_countries", JSON.stringify(partnerCountries));
+        renderPartnerCountryCheckboxes();
         syncLegalSettings();
       });
 
@@ -1058,29 +1076,48 @@
 
       appendLegalSystemMessage("국가를 선택하고 질문하거나 리스크 점검을 눌러 주세요.");
     }
+
+    syncLegalSettings();
   }
 
-  function renderPartnerCountrySelect() {
-    const partnerSelect = $("#legal-partner-country");
-    if (!partnerSelect) return;
-    const current = partnerCountry;
-    partnerSelect.innerHTML = '<option value="">선택</option>';
+  function renderPartnerCountryCheckboxes() {
+    const container = $("#legal-partner-countries");
+    if (!container) return;
+
+    container.innerHTML = "";
     legalCountries.forEach((c) => {
       if (c.code === myCountry) return;
-      const opt = document.createElement("option");
-      opt.value = c.code;
-      opt.textContent = c.label;
-      if (c.code === current) opt.selected = true;
-      partnerSelect.appendChild(opt);
+
+      const label = document.createElement("label");
+      label.className = "zm-country-chip";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = c.code;
+      cb.checked = partnerCountries.includes(c.code);
+      cb.disabled = !cb.checked && partnerCountries.length >= 8;
+
+      cb.addEventListener("change", () => {
+        partnerCountries = [...container.querySelectorAll("input:checked")].map((i) => i.value);
+        if (partnerCountries.length > 8) {
+          cb.checked = false;
+          partnerCountries = partnerCountries.slice(0, 8);
+        }
+        localStorage.setItem("lionmeet_partner_countries", JSON.stringify(partnerCountries));
+        renderPartnerCountryCheckboxes();
+        syncLegalSettings();
+      });
+
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(c.label));
+      container.appendChild(label);
     });
   }
 
   function getSelectedPartnerCountries() {
-    return partnerCountry ? [partnerCountry] : [];
+    return partnerCountries.filter((c) => c !== myCountry).slice(0, 8);
   }
 
   function syncLegalSettings() {
-    partnerCountry = $("#legal-partner-country")?.value || partnerCountry || "";
     send({
       type: "legal-settings",
       myCountry,
@@ -1121,14 +1158,16 @@
     const partners = getSelectedPartnerCountries();
     const myLabel =
       legalCountries.find((c) => c.code === myCountry)?.label || myCountry;
-    const partnerLabel = partners.length
-      ? legalCountries.find((c) => c.code === partners[0])?.label || partners[0]
+    const partnerLabels = partners.length
+      ? partners
+          .map((p) => legalCountries.find((c) => c.code === p)?.label || p)
+          .join(", ")
       : "미지정";
 
     const message =
       `다음 국제 미팅의 법률·세금·컴플라이언스 리스크를 점검해 주세요.\n` +
       `- 우리: ${myLabel}\n` +
-      `- 상대: ${partnerLabel}\n` +
+      `- 상대 (${partners.length || 0}개국): ${partnerLabels}\n` +
       `계약, 세금, 데이터 규제, IP 관점에서 ▲/●/○ 위험도와 확인할 사항을 정리해 주세요.`;
 
     appendLegalMessage("user", "리스크 점검 요청");
@@ -1500,7 +1539,82 @@
       severity,
     });
 
+    lastDetectedRisk = data;
+    const altSection = $("#risk-alternatives-section");
+    if (altSection) {
+      altSection.classList.remove("hidden");
+      $("#risk-alternatives-list") && ($("#risk-alternatives-list").innerHTML = "");
+    }
+
     if (severity === "high") openDrawer("risk");
+  }
+
+  function setAlternativesLoading(active) {
+    alternativesBusy = active;
+    const btn = $("#risk-alternatives-btn");
+    const loading = $("#risk-alternatives-loading");
+    if (btn) btn.disabled = active;
+    loading?.classList.toggle("hidden", !active);
+  }
+
+  function requestLegalAlternatives() {
+    if (!legalEnabled || alternativesBusy || !lastDetectedRisk) return;
+    syncLegalSettings();
+    setAlternativesLoading(true);
+    send({
+      type: "legal-alternatives",
+      risk: lastDetectedRisk,
+      ...getLegalPayload(),
+    });
+  }
+
+  function handleLegalAlternativesResponse(data) {
+    setAlternativesLoading(false);
+    const list = $("#risk-alternatives-list");
+    if (!list) return;
+
+    list.innerHTML = "";
+    const summary = (data.summary || "").trim();
+    if (summary) {
+      const p = document.createElement("p");
+      p.className = "zm-risk-alt-summary";
+      p.textContent = summary;
+      list.appendChild(p);
+    }
+
+    const alternatives = data.alternatives || [];
+    if (!alternatives.length) {
+      const empty = document.createElement("p");
+      empty.className = "zm-risk-alt-empty";
+      empty.textContent = summary ? "추가 대안을 생성하지 못했습니다." : "차선책을 생성하지 못했습니다.";
+      list.appendChild(empty);
+      return;
+    }
+
+    alternatives.forEach((alt, idx) => {
+      const card = document.createElement("article");
+      card.className = "zm-risk-alt-card";
+      const jurisdictions = (alt.jurisdictions || [])
+        .map((code) => legalCountries.find((c) => c.code === code)?.label || code)
+        .join(", ");
+      const cautions = (alt.cautions || []).map((c) => `<li>${escapeHtml(c)}</li>`).join("");
+      card.innerHTML = `
+        <h4>${escapeHtml(alt.title || `대안 ${idx + 1}`)}</h4>
+        <p>${escapeHtml(alt.description || "")}</p>
+        ${alt.whyCompliant ? `<p class="zm-risk-alt-why"><strong>합법 근거:</strong> ${escapeHtml(alt.whyCompliant)}</p>` : ""}
+        ${jurisdictions ? `<p class="zm-risk-alt-juris"><strong>관련 관할:</strong> ${escapeHtml(jurisdictions)}</p>` : ""}
+        ${cautions ? `<ul class="zm-risk-alt-cautions">${cautions}</ul>` : ""}
+      `;
+      list.appendChild(card);
+    });
+
+    const questions = data.questionsToConfirm || [];
+    if (questions.length) {
+      const qWrap = document.createElement("div");
+      qWrap.className = "zm-risk-alt-questions";
+      qWrap.innerHTML = `<strong>확인할 질문</strong><ul>${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}</ul>`;
+      list.appendChild(qWrap);
+    }
   }
 
   // ── Chat ───────────────────────────────────────────────────────────

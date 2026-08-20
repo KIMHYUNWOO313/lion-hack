@@ -9,6 +9,7 @@ from django.conf import settings
 
 from .firebase_store import save_chat_message_sync, save_transcript_message_sync
 from .legal_countries import LEGAL_COUNTRIES, VALID_COUNTRY_CODES
+from .legal_alternatives_service import suggest_compliant_alternatives
 from .legal_risk_service import detect_legal_risk
 from .legal_service import ask_legal_advisor
 from .room_registry import add_participant, get_channel, remove_participant
@@ -281,6 +282,42 @@ class MeetingConsumer(AsyncWebsocketConsumer):
                         "references": result.get("references", []),
                         "myCountry": my_country,
                         "partnerCountries": partner_list,
+                    }
+                )
+            )
+            return
+
+        if msg_type == "legal-alternatives":
+            if not self._joined:
+                return
+            risk = data.get("risk") or {}
+            if not (risk.get("title") or risk.get("summary")):
+                return
+
+            my_country = (data.get("myCountry") or self.my_country or "KR").upper()[:2]
+            if my_country not in VALID_COUNTRY_CODES:
+                my_country = "KR"
+            partners = data.get("partnerCountries") or self.partner_countries
+            partner_list = [
+                c.upper()[:2] for c in partners if c.upper()[:2] in VALID_COUNTRY_CODES
+            ][:8]
+            context = (data.get("meetingContext") or self.meeting_context or "")[:1000]
+
+            await self.send(
+                text_data=json.dumps({"type": "legal-alternatives-typing", "active": True})
+            )
+
+            result = await suggest_compliant_alternatives(
+                risk, my_country, partner_list, context
+            )
+
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "legal-alternatives-response",
+                        "summary": result.get("summary", ""),
+                        "alternatives": result.get("alternatives", []),
+                        "questionsToConfirm": result.get("questionsToConfirm", []),
                     }
                 )
             )

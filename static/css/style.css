@@ -1941,6 +1941,135 @@ body.drawer-resizing .zm-video-area {
   color: var(--zm-blue);
 }
 
+.zm-risk-mechanism-hint {
+  margin: 0 0 0.65rem;
+  padding: 0 0.15rem;
+  font-size: 0.68rem;
+  color: var(--zm-text-dim);
+  line-height: 1.4;
+}
+
+.zm-legal-field-wide {
+  margin-bottom: 0.45rem;
+}
+
+.zm-country-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 0.15rem 0;
+}
+
+.zm-country-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.28rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--zm-border);
+  background: var(--zm-surface-2);
+  font-size: 0.72rem;
+  color: var(--zm-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.zm-country-chip:has(input:checked) {
+  border-color: rgba(45, 140, 255, 0.5);
+  background: rgba(45, 140, 255, 0.12);
+  color: #9ec8ff;
+}
+
+.zm-country-chip input {
+  margin: 0;
+  accent-color: #2d8cff;
+}
+
+.zm-country-chip input:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.zm-risk-alt-intro {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  color: var(--zm-text-dim);
+  line-height: 1.45;
+}
+
+.zm-risk-alt-loading {
+  margin-top: 0.45rem;
+  font-size: 0.75rem;
+  color: var(--zm-text-dim);
+}
+
+.zm-risk-alternatives {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.zm-risk-alt-summary {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--zm-text);
+}
+
+.zm-risk-alt-empty {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--zm-text-dim);
+}
+
+.zm-risk-alt-card {
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--zm-border);
+  background: var(--zm-surface-2);
+}
+
+.zm-risk-alt-card h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  color: #9ec8ff;
+}
+
+.zm-risk-alt-card p {
+  margin: 0 0 0.35rem;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--zm-text);
+}
+
+.zm-risk-alt-why,
+.zm-risk-alt-juris {
+  font-size: 0.72rem !important;
+  color: var(--zm-text-dim) !important;
+}
+
+.zm-risk-alt-cautions {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+  font-size: 0.7rem;
+  color: #ffb347;
+}
+
+.zm-risk-alt-questions {
+  margin-top: 0.35rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--zm-border);
+  font-size: 0.72rem;
+}
+
+.zm-risk-alt-questions ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1rem;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .zm-lobby-inner {
