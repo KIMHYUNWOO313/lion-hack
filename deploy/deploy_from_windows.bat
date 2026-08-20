@@ -8,17 +8,8 @@ set KEY_FILE=%~dp0..\lion.pem
 
 echo === Deploying Lion Meet to %EC2_HOST% ===
 
-REM Sync project files (exclude venv, db, staticfiles)
-scp -i "%KEY_FILE%" -r ^
-  "%~dp0..\config" ^
-  "%~dp0..\meetings" ^
-  "%~dp0..\static" ^
-  "%~dp0..\deploy" ^
-  "%~dp0..\manage.py" ^
-  "%~dp0..\requirements.txt" ^
-  %EC2_USER%@%EC2_HOST%:/tmp/lion_meet_upload/
+scp -i "%KEY_FILE%" -r "%~dp0..\config" "%~dp0..\meetings" "%~dp0..\static" "%~dp0..\deploy" "%~dp0..\manage.py" "%~dp0..\requirements.txt" %EC2_USER%@%EC2_HOST%:/tmp/lion_meet_upload/
 
-REM Sync .env if present (Firebase SA, API keys — not in git)
 if exist "%~dp0..\.env" (
   scp -i "%KEY_FILE%" "%~dp0..\.env" %EC2_USER%@%EC2_HOST%:/tmp/lion_meet_upload/.env
 )
@@ -26,4 +17,4 @@ if exist "%~dp0..\.env" (
 ssh -i "%KEY_FILE%" %EC2_USER%@%EC2_HOST% "bash /tmp/lion_meet_upload/deploy/setup_ec2.sh"
 
 echo.
-echo Done! Visit http://%EC2_HOST%/
+echo Done! Visit https://3-34-197-18.sslip.io/
