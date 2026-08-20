@@ -12,7 +12,7 @@ DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes")
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv(
-        "ALLOWED_HOSTS", "localhost,127.0.0.1,3.34.197.18,3-34-197-18.sslip.io"
+        "ALLOWED_HOSTS", "localhost,127.0.0.1"
     ).split(",")
     if host.strip()
 ]

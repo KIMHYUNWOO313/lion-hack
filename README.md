@@ -8,7 +8,7 @@ Zoom 스타일 화상회의 웹앱 — Django + WebRTC + AI 법률·세무 자�
 - **화면 공유**: 원클릭 데스크톱/창 공유
 - **법률·세무 AI**: 국제 미팅 시 관할별 법률·세금·컴플라이언스 리스크 점검 및 참가자 공유
 - **채팅**: 회의 중 텍스트 채팅
-- **참가자 목록**: 음소거/비디오 상태 표시
+- **Firebase 녹화**: 회의 영상·음성·채팅 Firebase Storage/Firestore 저장
 - **WebSocket 시그널링**: Django Channels 기반
 
 ## 기술 스택
@@ -18,20 +18,23 @@ Zoom 스타일 화상회의 웹앱 — Django + WebRTC + AI 법률·세무 자�
 | Backend | Django 5, Django Channels, Daphne |
 | Frontend | HTML, CSS, JavaScript (Vanilla) |
 | 영상/음성 | WebRTC (P2P mesh) |
+| Auth / 녹화 | Firebase Auth, Storage, Firestore |
 | Legal AI | OpenAI Chat Completions (`gpt-5.6-terra`) |
-| Server | AWS EC2 (3.34.197.18) |
+| Server | AWS EC2 (배포 예시) |
 
 ## 로컬 실행
 
 ### 1. 환경 설정
 
-`.env` 파일에 OpenAI API 키를 설정하세요:
+프로젝트 루트에 `.env` 파일을 만들고 API 키 등을 설정하세요 (`.env`는 Git에 포함되지 않습니다).
 
 ```env
 GPT_API_KEY=sk-your-openai-api-key
 DJANGO_SECRET_KEY=your-random-secret-key
 DEBUG=True
 ALLOWED_HOSTS=localhost,127.0.0.1
+FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_SERVICE_ACCOUNT_JSON=
 ```
 
 ### 2. 설치 및 실행
@@ -52,15 +55,13 @@ python manage.py runserver
 
 ## AWS EC2 배포
 
-### 서버 정보
+배포 대상 서버 정보(IP, SSH 키, 도메인)는 **저장소에 포함하지 마세요.**  
+로컬에서 `deploy/` 스크립트의 호스트 값을 본인 환경에 맞게 설정한 뒤 사용하세요.
 
-- **Public IP**: 3.34.197.18
-- **SSH Key**: `lion.pem`
-
-### SSH 접속
+### SSH 접속 (예시)
 
 ```bash
-ssh -i lion.pem ubuntu@3.34.197.18
+ssh -i your-key.pem ubuntu@YOUR_EC2_HOST
 ```
 
 ### 배포 (Windows)
@@ -72,19 +73,17 @@ deploy\deploy_from_windows.bat
 ### 배포 (Linux/Mac)
 
 ```bash
-scp -i lion.pem -r config meetings static deploy manage.py requirements.txt ubuntu@3.34.197.18:/tmp/lion_meet_upload/
-ssh -i lion.pem ubuntu@3.34.197.18 "bash /tmp/lion_meet_upload/deploy/setup_ec2.sh"
+scp -i your-key.pem -r config meetings static deploy manage.py requirements.txt ubuntu@YOUR_EC2_HOST:/tmp/lion_meet_upload/
+ssh -i your-key.pem ubuntu@YOUR_EC2_HOST "bash /tmp/lion_meet_upload/deploy/setup_ec2.sh"
 ```
 
 ### EC2 보안 그룹
-
-다음 포트를 열어야 합니다:
 
 | 포트 | 용도 |
 |------|------|
 | 22 | SSH |
 | 80 | HTTP (Nginx) |
-| 443 | HTTPS (선택) |
+| 443 | HTTPS |
 | 8000 | Daphne (내부, Nginx 프록시) |
 
 WebRTC를 위해 UDP 포트도 필요할 수 있습니다 (STUN/TURN).
@@ -92,20 +91,18 @@ WebRTC를 위해 UDP 포트도 필요할 수 있습니다 (STUN/TURN).
 ### 배포 후 설정
 
 ```bash
-ssh -i lion.pem ubuntu@3.34.197.18
 sudo nano /opt/lion_meet/.env
-# GPT_API_KEY 설정 후:
+# GPT_API_KEY, FIREBASE_SERVICE_ACCOUNT_JSON 등 설정 후:
 sudo systemctl restart lion-meet
 ```
 
 ## 사용 방법
 
-1. http://3.34.197.18 접속
-2. **회의 만들기** 클릭 → 회의실 생성
-3. 회의 ID(URL)를 다른 참가자에게 공유
-4. 카메라/마이크 확인 후 **회의 참가**
-5. 하단 **법률 AI** 탭에서 국가·미팅 맥락을 설정하고 법률·세무 리스크 점검
-6. 중요 알림은 **참가자에게 공유** 버튼으로 전체에 브로드캐스트
+1. 배포된 URL(또는 `http://127.0.0.1:8000`) 접속
+2. **회원가입 / 로그인** 후 **새 회의** 또는 **회의 참가**
+3. 카메라/마이크 허용 후 회의 참가
+4. **법률 AI** · **리스크 모니터** 탭에서 실시간 점검
+5. **녹화본** 메뉴에서 Firebase에 저장된 기록 확인
 
 ## 법률 AI 아키텍처
 
@@ -129,15 +126,13 @@ sudo systemctl restart lion-meet
 lion_hack/
 ├── config/           # Django 설정 (settings, asgi, urls)
 ├── meetings/         # 메인 앱
-│   ├── consumers.py  # WebSocket (시그널링 + 법률 AI)
-│   ├── legal_service.py   # OpenAI 법률·세무 자문
-│   ├── legal_countries.py # 관할 국가 목록
+│   ├── consumers.py  # WebSocket (시그널링 + STT + 법률 AI)
+│   ├── firebase_store.py  # Firestore / 녹화 메타
 │   ├── views.py      # HTTP views
 │   └── templates/    # HTML 템플릿
 ├── static/
 │   ├── css/style.css
-│   └── js/
-│       └── room.js       # WebRTC + UI 로직
+│   └── js/           # WebRTC, Firebase auth/recording
 ├── deploy/           # AWS 배포 스크립트
 ├── requirements.txt
 └── .env              # API 키 (git 제외)
@@ -147,7 +142,8 @@ lion_hack/
 
 | 문제 | 해결 |
 |------|------|
-| 법률 AI 안 됨 | `.env`에 `GPT_API_KEY` 확인, `sudo systemctl restart lion-meet` |
+| 법률 AI 안 됨 | `.env`에 `GPT_API_KEY` 확인, 서비스 재시작 |
+| 녹화본 안 보임 | Firebase Firestore/Storage 활성화, Service Account 설정 |
 | 영상 연결 안 됨 | EC2 보안 그룹 UDP 허용, STUN 서버 접근 확인 |
 | WebSocket 끊김 | Nginx `proxy_read_timeout 86400` 설정 확인 |
 | static 파일 404 | `python manage.py collectstatic --noinput` 실행 |
