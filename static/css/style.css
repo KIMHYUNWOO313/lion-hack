@@ -613,6 +613,30 @@ body {
   50% { opacity: 0.35; }
 }
 
+.zm-recording-saving {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.zm-recording-saving-box {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+  background: var(--zm-surface);
+  border: 1px solid var(--zm-border);
+  color: var(--zm-text);
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
 .zm-topbar-right {
   display: flex;
   align-items: center;

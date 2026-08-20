@@ -39,6 +39,7 @@ function tsToIso(value) {
 function userCanAccess(data, uid) {
   if (!uid || !data) return false;
   if (data.startedBy?.uid === uid) return true;
+  if ((data.participantUids || []).includes(uid)) return true;
   for (const p of data.participants || []) {
     if (p.firebaseUid === uid) return true;
   }
@@ -71,14 +72,16 @@ function serializeVideos(videos) {
 
 function serializeSessionSummary(roomId, sessionId, data) {
   const videos = data.videos || {};
-  let chunkCount = 0;
-  let participantCount = 0;
-  for (const info of Object.values(videos)) {
-    if (!info || typeof info !== "object") continue;
-    participantCount += 1;
-    let chunks = info.chunks || [];
-    if (!Array.isArray(chunks)) chunks = Object.values(chunks);
-    chunkCount += chunks.length;
+  let chunkCount = data.chunkCount || 0;
+  let participantCount = data.participantCount || 0;
+  if (!chunkCount || !participantCount) {
+    for (const info of Object.values(videos)) {
+      if (!info || typeof info !== "object") continue;
+      participantCount += 1;
+      let chunks = info.chunks || [];
+      if (!Array.isArray(chunks)) chunks = Object.values(chunks);
+      chunkCount += chunks.length;
+    }
   }
   return {
     roomId,
@@ -89,7 +92,7 @@ function serializeSessionSummary(roomId, sessionId, data) {
     endedAt: tsToIso(data.endedAt),
     durationSec: data.durationSec || 0,
     chunkCount,
-    participantCount,
+    participantCount: participantCount || 1,
   };
 }
 
@@ -109,6 +112,16 @@ function serializeSession(roomId, sessionId, data) {
     videoTracks,
     chunkCount: videoTracks.reduce((n, v) => n + v.chunks.length, 0),
   };
+}
+
+function dedupeSummaries(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = `${item.roomId}:${item.sessionId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 let _app = null;
@@ -140,7 +153,7 @@ export async function ensureFirebaseUser(auth) {
       done = true;
       unsub();
       resolve(auth.currentUser || null);
-    }, 400);
+    }, 200);
   });
   if (existing) return existing;
 
@@ -158,10 +171,32 @@ export async function ensureFirebaseUser(auth) {
   );
 }
 
-export async function listRecordingsClient(firebaseConfig) {
-  const { auth, db } = initFirebaseRecordings(firebaseConfig);
-  const user = await ensureFirebaseUser(auth);
-  const uid = user.uid;
+async function querySummaries(db, uid) {
+  const results = [];
+
+  const indexAttempts = [
+    query(
+      collection(db, "userRecordings", uid, "sessions"),
+      orderBy("startedAt", "desc"),
+      limit(30)
+    ),
+    query(collection(db, "userRecordings", uid, "sessions"), limit(30)),
+  ];
+
+  for (const q of indexAttempts) {
+    try {
+      const snap = await getDocs(q);
+      snap.docs.forEach((docSnap) => {
+        const data = docSnap.data();
+        const roomId = data.roomId || docSnap.id.split("_")[0];
+        const sessionId = data.sessionId || docSnap.id.split("_").slice(1).join("_");
+        results.push(serializeSessionSummary(roomId, sessionId, data));
+      });
+      if (results.length) return dedupeSummaries(results);
+    } catch (err) {
+      console.warn("User recordings index query failed:", err);
+    }
+  }
 
   const attempts = [
     query(
@@ -171,21 +206,33 @@ export async function listRecordingsClient(firebaseConfig) {
       limit(30)
     ),
     query(collectionGroup(db, "sessions"), where("startedBy.uid", "==", uid), limit(30)),
+    query(
+      collectionGroup(db, "sessions"),
+      where("participantUids", "array-contains", uid),
+      limit(30)
+    ),
   ];
 
   for (const q of attempts) {
     try {
       const snap = await getDocs(q);
-      return snap.docs.map((docSnap) => {
+      snap.docs.forEach((docSnap) => {
         const roomId = docSnap.ref.parent.parent?.id;
-        return serializeSessionSummary(roomId, docSnap.id, docSnap.data());
+        results.push(serializeSessionSummary(roomId, docSnap.id, docSnap.data()));
       });
+      if (results.length) return dedupeSummaries(results);
     } catch (err) {
       console.warn("Firestore recordings query failed:", err);
     }
   }
 
-  return [];
+  return dedupeSummaries(results);
+}
+
+export async function listRecordingsClient(firebaseConfig) {
+  const { auth, db } = initFirebaseRecordings(firebaseConfig);
+  const user = await ensureFirebaseUser(auth);
+  return querySummaries(db, user.uid);
 }
 
 export async function getRecordingDetailClient(firebaseConfig, roomId, sessionId) {

@@ -101,7 +101,7 @@ async function loadFromServer() {
     if (data.code === "firestore_not_created") {
       throw new Error(data.error || "Firestore가 아직 설정되지 않았습니다.");
     }
-    return listRecordingsClient(firebaseConfig);
+    return null;
   }
   const data = await res.json();
   throw new Error(data.error || "녹화본을 불러오지 못했습니다.");
@@ -109,11 +109,33 @@ async function loadFromServer() {
 
 async function load() {
   try {
-    const items = useClientOnly
-      ? await listRecordingsClient(firebaseConfig)
-      : await loadFromServer();
+    if (useClientOnly) {
+      showItems(await listRecordingsClient(firebaseConfig));
+      return;
+    }
+
+    const clientPromise = listRecordingsClient(firebaseConfig).catch(() => []);
+    const serverPromise = loadFromServer().catch(() => null);
+
+    const [clientItems, serverItems] = await Promise.all([clientPromise, serverPromise]);
+    const items =
+      serverItems && serverItems.length
+        ? serverItems
+        : clientItems && clientItems.length
+          ? clientItems
+          : serverItems || clientItems || [];
+
     showItems(items);
   } catch (err) {
+    try {
+      const fallback = await listRecordingsClient(firebaseConfig);
+      if (fallback.length) {
+        showItems(fallback);
+        return;
+      }
+    } catch (_) {
+      /* ignore */
+    }
     showError(err.message || "녹화본을 불러오지 못했습니다.");
   }
 }

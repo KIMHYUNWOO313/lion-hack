@@ -17,6 +17,8 @@ from .stt_service import TranscriptionSession
 
 logger = logging.getLogger(__name__)
 
+_room_recording_sessions: dict[str, str] = {}
+
 
 class MeetingConsumer(AsyncWebsocketConsumer):
     """WebSocket consumer: WebRTC signaling, chat, legal advisor, realtime STT + risk."""
@@ -217,6 +219,7 @@ class MeetingConsumer(AsyncWebsocketConsumer):
                         "legalCountries": LEGAL_COUNTRIES,
                         "legalEnabled": bool(settings.OPENAI_API_KEY),
                         "sttEnabled": bool(settings.OPENAI_API_KEY),
+                        "activeRecordingSessionId": _room_recording_sessions.get(self.room_id),
                         "sttModel": (
                             self.stt_session.model
                             if self.stt_session
@@ -381,6 +384,20 @@ class MeetingConsumer(AsyncWebsocketConsumer):
             session_id = (data.get("sessionId") or "").strip()[:128]
             if session_id:
                 self.recording_session_id = session_id
+                _room_recording_sessions[self.room_id] = session_id
+                if data.get("broadcast"):
+                    await self.channel_layer.group_send(
+                        self.room_group,
+                        {
+                            "type": "relay_message",
+                            "sender": self.channel_name,
+                            "payload": {
+                                "type": "recording-session-active",
+                                "sessionId": session_id,
+                                "fromId": self.participant_id,
+                            },
+                        },
+                    )
             return
 
         if msg_type == "chat":

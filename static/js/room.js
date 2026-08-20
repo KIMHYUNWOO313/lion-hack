@@ -68,6 +68,9 @@
   let alternativesBusy = false;
   let meetingRecorder = null;
   let recordingSessionId = null;
+  let sharedRecordingSessionId = null;
+  let recordingInitStarted = false;
+  let leavingIntentionally = false;
 
   const DRAWER_WIDTH_KEY = "lionmeet_drawer_width";
   const DRAWER_MIN = 300;
@@ -292,6 +295,11 @@
           }
         }
 
+        if (data.activeRecordingSessionId) {
+          sharedRecordingSessionId = data.activeRecordingSessionId;
+        }
+        initMeetingRecording();
+
         sttEnabled = !!data.sttEnabled;
         if (sttEnabled) {
           startSTT();
@@ -299,7 +307,15 @@
           setSttStatus("off", "음성 인식 비활성 (API 키 없음)");
         }
         initRiskWaveform();
-        initMeetingRecording();
+        break;
+
+      case "recording-session-active":
+        if (data.sessionId && data.fromId !== myId) {
+          sharedRecordingSessionId = data.sessionId;
+          if (!recordingSessionId) {
+            initMeetingRecording();
+          }
+        }
         break;
 
       case "stt-ready":
@@ -733,6 +749,12 @@
     bindEnterToSend($("#legal-input"), sendLegalQuery);
     $("#legal-quick-check")?.addEventListener("click", runLegalQuickCheck);
     $("#risk-alternatives-btn")?.addEventListener("click", requestLegalAlternatives);
+
+    window.addEventListener("pagehide", () => {
+      if (!leavingIntentionally) {
+        meetingRecorder?.stop();
+      }
+    });
   }
 
   function applyDrawerWidth() {
@@ -970,9 +992,18 @@
     input.value = "";
   }
 
+  function showRecordingSaving(active) {
+    const el = $("#recording-saving-overlay");
+    if (el) el.classList.toggle("hidden", !active);
+  }
+
   async function initMeetingRecording() {
+    if (recordingInitStarted && recordingSessionId) return;
+    recordingInitStarted = true;
+
     const firebaseConfig = config.firebase;
     if (!firebaseConfig || !window.MeetingRecorderFactory) {
+      recordingInitStarted = false;
       if (!window.MeetingRecorderFactory) {
         window.addEventListener(
           "meeting-recorder-ready",
@@ -984,41 +1015,65 @@
     }
 
     try {
-      meetingRecorder = window.MeetingRecorderFactory({
-        firebaseConfig,
-        roomId: config.roomId,
-        roomName: config.roomName,
-        participantId: myId,
-        participantName: myName,
-        getLocalStream: () => screenStream || localStream,
-        getRemoteStreams: () => remoteStreams,
-        getParticipantIds: () => [myId, ...remoteStreams.keys()],
-        onStatusChange: ({ text, level, recording: isRec }) => {
-          const badge = $("#recording-badge");
-          if (badge) {
-            badge.classList.toggle("hidden", level !== "recording" && !isRec);
-            badge.title = text || "회의 녹화 중";
-          }
-        },
-      });
+      if (!meetingRecorder) {
+        meetingRecorder = window.MeetingRecorderFactory({
+          firebaseConfig,
+          roomId: config.roomId,
+          roomName: config.roomName,
+          participantId: myId,
+          participantName: myName,
+          getLocalStream: () => screenStream || localStream,
+          getRemoteStreams: () => remoteStreams,
+          getParticipantIds: () => [myId, ...remoteStreams.keys()],
+          onStatusChange: ({ text, level, recording: isRec }) => {
+            const badge = $("#recording-badge");
+            if (badge) {
+              badge.classList.toggle("hidden", level !== "recording" && !isRec);
+              badge.title = text || "회의 녹화 중";
+            }
+          },
+        });
+      }
 
-      recordingSessionId = await meetingRecorder.start();
+      const existingSession = sharedRecordingSessionId;
+      recordingSessionId = existingSession
+        ? await meetingRecorder.joinSession(existingSession)
+        : await meetingRecorder.start();
+
       if (recordingSessionId) {
-        send({ type: "recording-session", sessionId: recordingSessionId });
+        send({
+          type: "recording-session",
+          sessionId: recordingSessionId,
+          broadcast: !existingSession,
+        });
+      } else {
+        recordingInitStarted = false;
+        setTimeout(() => initMeetingRecording(), 3000);
       }
     } catch (err) {
+      recordingInitStarted = false;
       console.warn("Meeting recording unavailable:", err);
+      setTimeout(() => initMeetingRecording(), 5000);
+    }
+  }
+
+  async function finalizeRecording() {
+    if (!meetingRecorder) return;
+    showRecordingSaving(true);
+    try {
+      await meetingRecorder.stop();
+    } catch (err) {
+      console.warn("Recording stop failed:", err);
+    } finally {
+      showRecordingSaving(false);
     }
   }
 
   async function leaveMeeting() {
+    leavingIntentionally = true;
     clearInterval(timerInterval);
     stopSTT();
-    try {
-      await meetingRecorder?.stop();
-    } catch (err) {
-      console.warn("Recording stop failed:", err);
-    }
+    await finalizeRecording();
     peers.forEach((_, id) => removePeer(id));
     localStream?.getTracks().forEach((t) => t.stop());
     screenStream?.getTracks().forEach((t) => t.stop());

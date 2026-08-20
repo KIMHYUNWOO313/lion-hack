@@ -81,6 +81,8 @@ def _user_can_access_session(data: dict, firebase_uid: str) -> bool:
     started_by = data.get("startedBy") or {}
     if started_by.get("uid") == firebase_uid:
         return True
+    if firebase_uid in (data.get("participantUids") or []):
+        return True
     for p in data.get("participants") or []:
         if p.get("firebaseUid") == firebase_uid:
             return True
@@ -179,15 +181,58 @@ def list_recordings_for_user_sync(firebase_uid: str, limit: int = 30) -> list:
         nonlocal results
         for doc in query.stream():
             data = doc.to_dict() or {}
-            room_id = doc.reference.parent.parent.id
-            session_id = doc.id
+            room_id = data.get("roomId")
+            session_id = data.get("sessionId")
+            if not room_id or not session_id:
+                try:
+                    room_id = doc.reference.parent.parent.id
+                    session_id = doc.id
+                except Exception:
+                    continue
             key = f"{room_id}:{session_id}"
             if key in seen:
                 continue
             seen.add(key)
-            results.append(_serialize_session_summary(room_id, session_id, data))
+
+            if data.get("roomId") and data.get("sessionId") and "videos" not in data:
+                results.append(
+                    {
+                        "roomId": room_id,
+                        "sessionId": session_id,
+                        "roomName": data.get("roomName") or "",
+                        "status": data.get("status") or "unknown",
+                        "startedAt": _ts_to_iso(data.get("startedAt")),
+                        "endedAt": _ts_to_iso(data.get("endedAt")),
+                        "durationSec": data.get("durationSec") or 0,
+                        "chunkCount": data.get("chunkCount") or 0,
+                        "participantCount": data.get("participantCount") or 1,
+                    }
+                )
+            else:
+                results.append(_serialize_session_summary(room_id, session_id, data))
             if len(results) >= limit:
                 break
+
+    index_attempts = [
+        db.collection("userRecordings")
+        .document(firebase_uid)
+        .collection("sessions")
+        .order_by("startedAt", direction=firestore.Query.DESCENDING)
+        .limit(limit),
+        db.collection("userRecordings")
+        .document(firebase_uid)
+        .collection("sessions")
+        .limit(limit),
+    ]
+
+    for q in index_attempts:
+        try:
+            collect_from_query(q)
+            if results:
+                results.sort(key=lambda r: r.get("startedAt") or "", reverse=True)
+                return results[:limit]
+        except Exception as exc:
+            logger.warning("User recordings index query failed: %s", exc)
 
     query_attempts = [
         db.collection_group("sessions")
@@ -197,14 +242,17 @@ def list_recordings_for_user_sync(firebase_uid: str, limit: int = 30) -> list:
         db.collection_group("sessions")
         .where("startedBy.uid", "==", firebase_uid)
         .limit(limit),
+        db.collection_group("sessions")
+        .where("participantUids", "array_contains", firebase_uid)
+        .limit(limit),
     ]
 
     for q in query_attempts:
         try:
             collect_from_query(q)
             if results:
-                return results
-            # Empty but successful query — no recordings for this user.
+                results.sort(key=lambda r: r.get("startedAt") or "", reverse=True)
+                return results[:limit]
             return []
         except Exception as exc:
             logger.warning("Firestore recordings query failed: %s", exc)

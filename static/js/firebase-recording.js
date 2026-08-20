@@ -15,6 +15,7 @@ import {
   updateDoc,
   collection,
   addDoc,
+  arrayUnion,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import {
   getDownloadURL,
@@ -71,6 +72,7 @@ export function createMeetingRecorder(options) {
   const audioSources = new Map();
   let chunkIndex = 0;
   let uploadedChunks = [];
+  const pendingUploads = new Set();
   let recording = false;
   let meetingStartMs = Date.now();
   let finalizePromise = null;
@@ -114,6 +116,25 @@ export function createMeetingRecorder(options) {
     return auth.currentUser;
   }
 
+  async function indexSessionForUser(user, status = "recording") {
+    if (!user?.uid || !sessionId) return;
+    const indexRef = doc(db, "userRecordings", user.uid, "sessions", `${roomId}_${sessionId}`);
+    await setDoc(
+      indexRef,
+      {
+        roomId,
+        sessionId,
+        roomName: roomName || "",
+        status,
+        startedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        participantId,
+        participantName: participantName || "",
+      },
+      { merge: true }
+    );
+  }
+
   async function createSession() {
     sessionId = uuid();
     meetingStartMs = Date.now();
@@ -129,6 +150,7 @@ export function createMeetingRecorder(options) {
         email: user?.email || "",
         displayName: user?.displayName || participantName || "",
       },
+      participantUids: user?.uid ? [user.uid] : [],
       participants: [
         {
           participantId,
@@ -137,6 +159,29 @@ export function createMeetingRecorder(options) {
         },
       ],
     });
+    await indexSessionForUser(user, "recording");
+    return sessionId;
+  }
+
+  async function attachToSession(existingSessionId) {
+    sessionId = existingSessionId;
+    meetingStartMs = Date.now();
+    const user = auth.currentUser;
+    const sessionRef = doc(db, "meetings", roomId, "sessions", sessionId);
+    await setDoc(
+      sessionRef,
+      {
+        participants: arrayUnion({
+          participantId,
+          name: participantName || "",
+          firebaseUid: user?.uid || "",
+        }),
+        participantUids: user?.uid ? arrayUnion(user.uid) : [],
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    await indexSessionForUser(user, "recording");
     return sessionId;
   }
 
@@ -238,80 +283,101 @@ export function createMeetingRecorder(options) {
   }
 
   async function uploadChunk(blob) {
-    const idx = chunkIndex++;
-    const path = `recordings/${roomId}/${sessionId}/${participantId}/chunk-${String(idx).padStart(5, "0")}.webm`;
-    const storageRef = ref(storage, path);
-    const task = uploadBytesResumable(storageRef, blob, {
-      contentType: blob.type || "video/webm",
-    });
+    const task = (async () => {
+      const idx = chunkIndex++;
+      const path = `recordings/${roomId}/${sessionId}/${participantId}/chunk-${String(idx).padStart(5, "0")}.webm`;
+      const storageRef = ref(storage, path);
+      const uploadTask = uploadBytesResumable(storageRef, blob, {
+        contentType: blob.type || "video/webm",
+      });
 
-    await new Promise((resolve, reject) => {
-      task.on("state_changed", null, reject, resolve);
-    });
+      await new Promise((resolve, reject) => {
+        uploadTask.on("state_changed", null, reject, resolve);
+      });
 
-    const url = await getDownloadURL(storageRef);
-    uploadedChunks.push({ index: idx, path, url, size: blob.size });
-    const sessionRef = doc(db, "meetings", roomId, "sessions", sessionId);
-    await updateDoc(sessionRef, {
-      [`videos.${participantId}.chunks`]: uploadedChunks,
-      [`videos.${participantId}.participantName`]: participantName,
-      updatedAt: serverTimestamp(),
-    });
+      const url = await getDownloadURL(storageRef);
+      uploadedChunks.push({ index: idx, path, url, size: blob.size });
+      const sessionRef = doc(db, "meetings", roomId, "sessions", sessionId);
+      await updateDoc(sessionRef, {
+        [`videos.${participantId}.chunks`]: uploadedChunks,
+        [`videos.${participantId}.participantName`]: participantName,
+        [`videos.${participantId}.firebaseUid`]: auth.currentUser?.uid || "",
+        updatedAt: serverTimestamp(),
+      });
+    })();
+
+    pendingUploads.add(task);
+    try {
+      await task;
+    } finally {
+      pendingUploads.delete(task);
+    }
   }
 
-  async function start() {
+  async function beginCapture() {
+    canvas = document.createElement("canvas");
+    canvas.width = 1280;
+    canvas.height = 720;
+    ctx = canvas.getContext("2d");
+    setupAudioMix();
+    drawCompositeFrame();
+    drawTimer = setInterval(drawCompositeFrame, 1000 / 15);
+
+    const videoStream = canvas.captureStream(15);
+    audioDest.stream.getAudioTracks().forEach((t) => videoStream.addTrack(t));
+
+    const mimeType = pickMimeType();
+    if (!mimeType) {
+      throw new Error("브라우저가 WebM 녹화를 지원하지 않습니다.");
+    }
+
+    recorder = new MediaRecorder(videoStream, {
+      mimeType,
+      videoBitsPerSecond: 2_500_000,
+      audioBitsPerSecond: 128_000,
+    });
+
+    recorder.ondataavailable = (e) => {
+      if (e.data?.size > 0) {
+        uploadChunk(e.data).catch((err) => {
+          console.warn("Chunk upload failed:", err);
+          setStatus("업로드 일부 실패", "warn");
+        });
+      }
+    };
+
+    recorder.onerror = (e) => {
+      console.error("MediaRecorder error:", e);
+      setStatus("녹화 오류", "error");
+    };
+
+    recorder.start(15_000);
+    recording = true;
+    setStatus("녹화 중", "recording");
+  }
+
+  async function start(existingSessionId = null) {
     if (recording) return sessionId;
     try {
       setStatus("Firebase 연결 중…");
       await ensureFirebaseAuth();
-      await createSession();
-      setStatus("녹화 준비 중…");
-
-      canvas = document.createElement("canvas");
-      canvas.width = 1280;
-      canvas.height = 720;
-      ctx = canvas.getContext("2d");
-      setupAudioMix();
-      drawCompositeFrame();
-      drawTimer = setInterval(drawCompositeFrame, 1000 / 15);
-
-      const videoStream = canvas.captureStream(15);
-      audioDest.stream.getAudioTracks().forEach((t) => videoStream.addTrack(t));
-
-      const mimeType = pickMimeType();
-      if (!mimeType) {
-        throw new Error("브라우저가 WebM 녹화를 지원하지 않습니다.");
+      if (existingSessionId) {
+        await attachToSession(existingSessionId);
+      } else {
+        await createSession();
       }
-
-      recorder = new MediaRecorder(videoStream, {
-        mimeType,
-        videoBitsPerSecond: 2_500_000,
-        audioBitsPerSecond: 128_000,
-      });
-
-      recorder.ondataavailable = (e) => {
-        if (e.data?.size > 0) {
-          uploadChunk(e.data).catch((err) => {
-            console.warn("Chunk upload failed:", err);
-            setStatus("업로드 일부 실패", "warn");
-          });
-        }
-      };
-
-      recorder.onerror = (e) => {
-        console.error("MediaRecorder error:", e);
-        setStatus("녹화 오류", "error");
-      };
-
-      recorder.start(15_000);
-      recording = true;
-      setStatus("녹화 중", "recording");
+      setStatus("녹화 준비 중…");
+      await beginCapture();
       return sessionId;
     } catch (err) {
       console.error("Recording start failed:", err);
       setStatus(err.message || "녹화 시작 실패", "error");
       return null;
     }
+  }
+
+  async function joinSession(existingSessionId) {
+    return start(existingSessionId);
   }
 
   async function saveChatClient(message, fromId, fromName, msgElapsedSec) {
@@ -353,12 +419,16 @@ export function createMeetingRecorder(options) {
         }
         recorder.onstop = resolve;
         try {
+          if (recorder.state === "recording") {
+            recorder.requestData();
+          }
           recorder.stop();
         } catch (_) {
           resolve();
         }
       });
       await stopRecorder;
+      await Promise.allSettled([...pendingUploads]);
 
       audioSources.forEach((s) => {
         try {
@@ -372,14 +442,27 @@ export function createMeetingRecorder(options) {
 
       if (sessionId) {
         try {
+          const user = auth.currentUser;
           const sessionRef = doc(db, "meetings", roomId, "sessions", sessionId);
+          const duration = elapsedSec();
           await updateDoc(sessionRef, {
             status: "completed",
             endedAt: serverTimestamp(),
-            durationSec: elapsedSec(),
+            durationSec: duration,
             [`videos.${participantId}.status`]: "completed",
             [`videos.${participantId}.chunkCount`]: uploadedChunks.length,
           });
+          await indexSessionForUser(user, "completed");
+          if (user?.uid) {
+            const indexRef = doc(db, "userRecordings", user.uid, "sessions", `${roomId}_${sessionId}`);
+            await updateDoc(indexRef, {
+              status: "completed",
+              endedAt: serverTimestamp(),
+              durationSec: duration,
+              chunkCount: uploadedChunks.length,
+              updatedAt: serverTimestamp(),
+            });
+          }
         } catch (err) {
           console.warn("Session finalize failed:", err);
         }
@@ -393,6 +476,7 @@ export function createMeetingRecorder(options) {
 
   return {
     start,
+    joinSession,
     stop,
     saveChatClient,
     onRemoteStream,
