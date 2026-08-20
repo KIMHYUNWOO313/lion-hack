@@ -624,6 +624,22 @@ body {
   backdrop-filter: blur(4px);
 }
 
+.zm-recording-error {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9998;
+  margin: 0;
+  max-width: 90vw;
+  padding: 0.55rem 0.9rem;
+  border-radius: 8px;
+  background: rgba(232, 23, 61, 0.15);
+  border: 1px solid rgba(232, 23, 61, 0.45);
+  color: #ff9bb0;
+  font-size: 0.8rem;
+}
+
 .zm-recording-saving-box {
   display: flex;
   align-items: center;

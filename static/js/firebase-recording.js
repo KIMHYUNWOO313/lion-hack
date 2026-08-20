@@ -44,6 +44,9 @@ function uuid() {
   return crypto.randomUUID ? crypto.randomUUID() : `rec-${Date.now()}`;
 }
 
+const WRITE_TIMEOUT_MS = 12_000;
+const FINALIZE_TIMEOUT_MS = 15_000;
+
 export function createMeetingRecorder(options) {
   const {
     firebaseConfig,
@@ -61,6 +64,8 @@ export function createMeetingRecorder(options) {
   const auth = getAuth(app);
   const db = getFirestore(app);
   const storage = getStorage(app);
+  storage.maxUploadRetryTime = 20_000;
+  storage.maxOperationRetryTime = 20_000;
 
   let sessionId = null;
   let recorder = null;
@@ -79,6 +84,21 @@ export function createMeetingRecorder(options) {
 
   function setStatus(text, level = "info") {
     onStatusChange?.({ text, level, sessionId, recording });
+  }
+
+  // Firestore writes never settle while the backend is unreachable (e.g. the
+  // database has not been created yet), so every call needs its own deadline.
+  function withTimeout(promise, ms, label) {
+    let timer = null;
+    return Promise.race([
+      promise.finally(() => clearTimeout(timer)),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} 시간 초과 (${ms / 1000}초)`)),
+          ms
+        );
+      }),
+    ]);
   }
 
   async function ensureFirebaseAuth() {
@@ -119,69 +139,88 @@ export function createMeetingRecorder(options) {
   async function indexSessionForUser(user, status = "recording") {
     if (!user?.uid || !sessionId) return;
     const indexRef = doc(db, "userRecordings", user.uid, "sessions", `${roomId}_${sessionId}`);
-    await setDoc(
-      indexRef,
-      {
-        roomId,
-        sessionId,
-        roomName: roomName || "",
-        status,
-        startedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        participantId,
-        participantName: participantName || "",
-      },
-      { merge: true }
+    await withTimeout(
+      setDoc(
+        indexRef,
+        {
+          roomId,
+          sessionId,
+          roomName: roomName || "",
+          status,
+          startedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          participantId,
+          participantName: participantName || "",
+        },
+        { merge: true }
+      ),
+      WRITE_TIMEOUT_MS,
+      "녹화 목록 저장"
     );
   }
 
   async function createSession() {
-    sessionId = uuid();
-    meetingStartMs = Date.now();
+    const newSessionId = uuid();
     const user = auth.currentUser;
-    const sessionRef = doc(db, "meetings", roomId, "sessions", sessionId);
-    await setDoc(sessionRef, {
-      roomId,
-      roomName: roomName || "",
-      status: "recording",
-      startedAt: serverTimestamp(),
-      startedBy: {
-        uid: user?.uid || "",
-        email: user?.email || "",
-        displayName: user?.displayName || participantName || "",
-      },
-      participantUids: user?.uid ? [user.uid] : [],
-      participants: [
-        {
-          participantId,
-          name: participantName || "",
-          firebaseUid: user?.uid || "",
+    const sessionRef = doc(db, "meetings", roomId, "sessions", newSessionId);
+    await withTimeout(
+      setDoc(sessionRef, {
+        roomId,
+        roomName: roomName || "",
+        status: "recording",
+        startedAt: serverTimestamp(),
+        startedBy: {
+          uid: user?.uid || "",
+          email: user?.email || "",
+          displayName: user?.displayName || participantName || "",
         },
-      ],
-    });
-    await indexSessionForUser(user, "recording");
+        participantUids: user?.uid ? [user.uid] : [],
+        participants: [
+          {
+            participantId,
+            name: participantName || "",
+            firebaseUid: user?.uid || "",
+          },
+        ],
+      }),
+      WRITE_TIMEOUT_MS,
+      "녹화 세션 생성"
+    );
+
+    sessionId = newSessionId;
+    meetingStartMs = Date.now();
+    await indexSessionForUser(user, "recording").catch((err) =>
+      console.warn("Recording index failed:", err)
+    );
     return sessionId;
   }
 
   async function attachToSession(existingSessionId) {
+    const user = auth.currentUser;
+    const sessionRef = doc(db, "meetings", roomId, "sessions", existingSessionId);
+    await withTimeout(
+      setDoc(
+        sessionRef,
+        {
+          participants: arrayUnion({
+            participantId,
+            name: participantName || "",
+            firebaseUid: user?.uid || "",
+          }),
+          participantUids: user?.uid ? arrayUnion(user.uid) : [],
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      ),
+      WRITE_TIMEOUT_MS,
+      "녹화 세션 참가"
+    );
+
     sessionId = existingSessionId;
     meetingStartMs = Date.now();
-    const user = auth.currentUser;
-    const sessionRef = doc(db, "meetings", roomId, "sessions", sessionId);
-    await setDoc(
-      sessionRef,
-      {
-        participants: arrayUnion({
-          participantId,
-          name: participantName || "",
-          firebaseUid: user?.uid || "",
-        }),
-        participantUids: user?.uid ? arrayUnion(user.uid) : [],
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
+    await indexSessionForUser(user, "recording").catch((err) =>
+      console.warn("Recording index failed:", err)
     );
-    await indexSessionForUser(user, "recording");
     return sessionId;
   }
 
@@ -298,12 +337,16 @@ export function createMeetingRecorder(options) {
       const url = await getDownloadURL(storageRef);
       uploadedChunks.push({ index: idx, path, url, size: blob.size });
       const sessionRef = doc(db, "meetings", roomId, "sessions", sessionId);
-      await updateDoc(sessionRef, {
-        [`videos.${participantId}.chunks`]: uploadedChunks,
-        [`videos.${participantId}.participantName`]: participantName,
-        [`videos.${participantId}.firebaseUid`]: auth.currentUser?.uid || "",
-        updatedAt: serverTimestamp(),
-      });
+      await withTimeout(
+        updateDoc(sessionRef, {
+          [`videos.${participantId}.chunks`]: uploadedChunks,
+          [`videos.${participantId}.participantName`]: participantName,
+          [`videos.${participantId}.firebaseUid`]: auth.currentUser?.uid || "",
+          updatedAt: serverTimestamp(),
+        }),
+        WRITE_TIMEOUT_MS,
+        "청크 정보 저장"
+      );
     })();
 
     pendingUploads.add(task);
@@ -383,14 +426,18 @@ export function createMeetingRecorder(options) {
   async function saveChatClient(message, fromId, fromName, msgElapsedSec) {
     if (!sessionId || !message) return;
     try {
-      await addDoc(collection(db, "meetings", roomId, "sessions", sessionId, "chat"), {
-        fromId,
-        fromName,
-        message: message.slice(0, 500),
-        elapsedSec: msgElapsedSec ?? elapsedSec(),
-        createdAt: serverTimestamp(),
-        source: "client",
-      });
+      await withTimeout(
+        addDoc(collection(db, "meetings", roomId, "sessions", sessionId, "chat"), {
+          fromId,
+          fromName,
+          message: message.slice(0, 500),
+          elapsedSec: msgElapsedSec ?? elapsedSec(),
+          createdAt: serverTimestamp(),
+          source: "client",
+        }),
+        WRITE_TIMEOUT_MS,
+        "채팅 저장"
+      );
     } catch (err) {
       console.warn("Client chat save failed:", err);
     }
@@ -427,8 +474,12 @@ export function createMeetingRecorder(options) {
           resolve();
         }
       });
-      await stopRecorder;
-      await Promise.allSettled([...pendingUploads]);
+      await withTimeout(stopRecorder, 5_000, "녹화 종료").catch(() => {});
+      await withTimeout(
+        Promise.allSettled([...pendingUploads]),
+        FINALIZE_TIMEOUT_MS,
+        "남은 영상 업로드"
+      ).catch((err) => console.warn(err));
 
       audioSources.forEach((s) => {
         try {
@@ -440,35 +491,54 @@ export function createMeetingRecorder(options) {
         await audioCtx?.close().catch(() => {});
       }
 
+      let saved = false;
       if (sessionId) {
         try {
           const user = auth.currentUser;
           const sessionRef = doc(db, "meetings", roomId, "sessions", sessionId);
           const duration = elapsedSec();
-          await updateDoc(sessionRef, {
-            status: "completed",
-            endedAt: serverTimestamp(),
-            durationSec: duration,
-            [`videos.${participantId}.status`]: "completed",
-            [`videos.${participantId}.chunkCount`]: uploadedChunks.length,
-          });
-          await indexSessionForUser(user, "completed");
-          if (user?.uid) {
-            const indexRef = doc(db, "userRecordings", user.uid, "sessions", `${roomId}_${sessionId}`);
-            await updateDoc(indexRef, {
+          await withTimeout(
+            updateDoc(sessionRef, {
               status: "completed",
               endedAt: serverTimestamp(),
               durationSec: duration,
-              chunkCount: uploadedChunks.length,
-              updatedAt: serverTimestamp(),
-            });
+              [`videos.${participantId}.status`]: "completed",
+              [`videos.${participantId}.chunkCount`]: uploadedChunks.length,
+            }),
+            WRITE_TIMEOUT_MS,
+            "녹화 마무리 저장"
+          );
+          if (user?.uid) {
+            const indexRef = doc(db, "userRecordings", user.uid, "sessions", `${roomId}_${sessionId}`);
+            await withTimeout(
+              setDoc(
+                indexRef,
+                {
+                  roomId,
+                  sessionId,
+                  roomName: roomName || "",
+                  status: "completed",
+                  endedAt: serverTimestamp(),
+                  durationSec: duration,
+                  chunkCount: uploadedChunks.length,
+                  updatedAt: serverTimestamp(),
+                },
+                { merge: true }
+              ),
+              WRITE_TIMEOUT_MS,
+              "녹화 목록 갱신"
+            );
           }
+          saved = true;
         } catch (err) {
           console.warn("Session finalize failed:", err);
         }
       }
 
-      setStatus("녹화 저장 완료", "done");
+      setStatus(
+        saved ? "녹화 저장 완료" : "녹화 저장 실패 — Firebase 설정을 확인하세요",
+        saved ? "done" : "error"
+      );
     })();
 
     return finalizePromise;

@@ -70,6 +70,7 @@
   let recordingSessionId = null;
   let sharedRecordingSessionId = null;
   let recordingInitStarted = false;
+  let recordingRetries = 0;
   let leavingIntentionally = false;
 
   const DRAWER_WIDTH_KEY = "lionmeet_drawer_width";
@@ -992,9 +993,12 @@
     input.value = "";
   }
 
-  function showRecordingSaving(active) {
+  function showRecordingSaving(active, text) {
     const el = $("#recording-saving-overlay");
-    if (el) el.classList.toggle("hidden", !active);
+    if (!el) return;
+    el.classList.toggle("hidden", !active);
+    const label = $("#recording-saving-text");
+    if (label && text) label.textContent = text;
   }
 
   async function initMeetingRecording() {
@@ -1031,6 +1035,9 @@
               badge.classList.toggle("hidden", level !== "recording" && !isRec);
               badge.title = text || "회의 녹화 중";
             }
+            if (level === "error") {
+              showRecordingError(text);
+            }
           },
         });
       }
@@ -1041,27 +1048,47 @@
         : await meetingRecorder.start();
 
       if (recordingSessionId) {
+        recordingRetries = 0;
         send({
           type: "recording-session",
           sessionId: recordingSessionId,
           broadcast: !existingSession,
         });
       } else {
-        recordingInitStarted = false;
-        setTimeout(() => initMeetingRecording(), 3000);
+        scheduleRecordingRetry();
       }
     } catch (err) {
-      recordingInitStarted = false;
       console.warn("Meeting recording unavailable:", err);
-      setTimeout(() => initMeetingRecording(), 5000);
+      scheduleRecordingRetry();
     }
+  }
+
+  function scheduleRecordingRetry() {
+    recordingInitStarted = false;
+    if (recordingRetries >= 3) {
+      showRecordingError("녹화를 시작할 수 없습니다. Firebase 설정을 확인해 주세요.");
+      return;
+    }
+    recordingRetries += 1;
+    setTimeout(() => initMeetingRecording(), 4000);
+  }
+
+  function showRecordingError(message) {
+    const el = $("#recording-error-banner");
+    if (!el) return;
+    el.textContent = message || "녹화를 시작할 수 없습니다.";
+    el.classList.remove("hidden");
   }
 
   async function finalizeRecording() {
     if (!meetingRecorder) return;
-    showRecordingSaving(true);
+    showRecordingSaving(true, "녹화본 저장 중…");
     try {
-      await meetingRecorder.stop();
+      // Never let a stalled Firebase write trap the user inside the room.
+      await Promise.race([
+        meetingRecorder.stop(),
+        new Promise((resolve) => setTimeout(resolve, 20000)),
+      ]);
     } catch (err) {
       console.warn("Recording stop failed:", err);
     } finally {
@@ -1070,15 +1097,22 @@
   }
 
   async function leaveMeeting() {
+    if (leavingIntentionally) return;
     leavingIntentionally = true;
     clearInterval(timerInterval);
-    stopSTT();
-    await finalizeRecording();
-    peers.forEach((_, id) => removePeer(id));
-    localStream?.getTracks().forEach((t) => t.stop());
-    screenStream?.getTracks().forEach((t) => t.stop());
-    ws?.close();
-    window.location.href = "/";
+
+    try {
+      stopSTT();
+      await finalizeRecording();
+      peers.forEach((_, id) => removePeer(id));
+      localStream?.getTracks().forEach((t) => t.stop());
+      screenStream?.getTracks().forEach((t) => t.stop());
+      ws?.close();
+    } catch (err) {
+      console.warn("Leave cleanup failed:", err);
+    } finally {
+      window.location.href = "/";
+    }
   }
 
   function startMeetingTimer() {
