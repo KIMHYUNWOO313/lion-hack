@@ -6,7 +6,6 @@ const errorEl = document.getElementById("recordings-error");
 const emptyEl = document.getElementById("recordings-empty");
 
 const firebaseConfig = JSON.parse(document.getElementById("firebase-config").textContent);
-const useClientOnly = document.body.dataset.clientOnly === "true";
 
 function escapeHtml(str) {
   const d = document.createElement("div");
@@ -90,52 +89,35 @@ function showError(msg) {
   errorEl.classList.remove("hidden");
 }
 
-async function loadFromServer() {
-  const res = await fetch("/api/recordings/", { credentials: "same-origin" });
-  if (res.ok) {
-    const data = await res.json();
-    return data.recordings || [];
+async function fetchJson(url, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { credentials: "same-origin", signal: controller.signal });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+  } finally {
+    clearTimeout(timer);
   }
-  if (res.status === 503) {
-    const data = await res.json();
-    if (data.code === "firestore_not_created") {
-      throw new Error(data.error || "Firestore가 아직 설정되지 않았습니다.");
-    }
-    return null;
-  }
-  const data = await res.json();
-  throw new Error(data.error || "녹화본을 불러오지 못했습니다.");
 }
 
 async function load() {
   try {
-    if (useClientOnly) {
-      showItems(await listRecordingsClient(firebaseConfig));
+    const { res, data } = await fetchJson("/api/recordings/");
+    if (res.ok) {
+      showItems(data.recordings || []);
       return;
     }
+  } catch (err) {
+    if (err.name !== "AbortError") {
+      /* fall through to client */
+    }
+  }
 
-    const clientPromise = listRecordingsClient(firebaseConfig).catch(() => []);
-    const serverPromise = loadFromServer().catch(() => null);
-
-    const [clientItems, serverItems] = await Promise.all([clientPromise, serverPromise]);
-    const items =
-      serverItems && serverItems.length
-        ? serverItems
-        : clientItems && clientItems.length
-          ? clientItems
-          : serverItems || clientItems || [];
-
+  try {
+    const items = await listRecordingsClient(firebaseConfig);
     showItems(items);
   } catch (err) {
-    try {
-      const fallback = await listRecordingsClient(firebaseConfig);
-      if (fallback.length) {
-        showItems(fallback);
-        return;
-      }
-    } catch (_) {
-      /* ignore */
-    }
     showError(err.message || "녹화본을 불러오지 못했습니다.");
   }
 }

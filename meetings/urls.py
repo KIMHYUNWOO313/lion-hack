@@ -16,6 +16,17 @@ urlpatterns = [
         recording_views.api_recording_detail,
         name="api_recording_detail",
     ),
+    path("api/recordings/session/start/", recording_views.api_recording_start, name="api_recording_start"),
+    path(
+        "api/recordings/session/<str:session_id>/chunk/",
+        recording_views.api_recording_chunk,
+        name="api_recording_chunk",
+    ),
+    path(
+        "api/recordings/session/<str:session_id>/complete/",
+        recording_views.api_recording_complete,
+        name="api_recording_complete",
+    ),
     path("api/auth/me/", auth_views.auth_me, name="auth_me"),
     path("api/auth/session/", auth_views.auth_session, name="auth_session"),
     path("api/auth/logout/", auth_views.auth_logout, name="auth_logout"),

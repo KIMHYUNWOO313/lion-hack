@@ -803,6 +803,7 @@ body.drawer-resizing .zm-video-area {
 }
 
 .zm-tile.local video { transform: scaleX(-1); }
+.zm-tile.local.screen-sharing video { transform: none; }
 
 .zm-avatar {
   position: absolute;

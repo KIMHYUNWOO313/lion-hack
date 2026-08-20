@@ -66,6 +66,7 @@
   let legalUiInitialized = false;
   let lastDetectedRisk = null;
   let alternativesBusy = false;
+  let lastForwardedRiskKey = "";
   let meetingRecorder = null;
   let recordingSessionId = null;
   let sharedRecordingSessionId = null;
@@ -945,6 +946,7 @@
       });
       isSharingScreen = true;
       $("#toggle-screen").classList.add("active");
+      document.getElementById(`tile-${myId}`)?.classList.add("screen-sharing");
 
       const localVideo = document.getElementById(`video-${myId}`);
       if (localVideo) {
@@ -967,6 +969,7 @@
     isSharingScreen = false;
     $("#toggle-screen").classList.remove("active");
     $("#screen-share-banner").classList.add("hidden");
+    document.getElementById(`tile-${myId}`)?.classList.remove("screen-sharing");
 
     const localVideo = document.getElementById(`video-${myId}`);
     if (localVideo) localVideo.srcObject = localStream;
@@ -1066,7 +1069,7 @@
   function scheduleRecordingRetry() {
     recordingInitStarted = false;
     if (recordingRetries >= 3) {
-      showRecordingError("녹화를 시작할 수 없습니다. Firebase 설정을 확인해 주세요.");
+      showRecordingError("녹화를 시작할 수 없습니다. 로그인 상태와 Firebase Storage 설정을 확인해 주세요.");
       return;
     }
     recordingRetries += 1;
@@ -1636,6 +1639,38 @@
     }
 
     if (severity === "high") openDrawer("risk");
+    forwardRiskToLegalAdvisor(data);
+  }
+
+  function forwardRiskToLegalAdvisor(data) {
+    if (!legalEnabled || legalBusy) return;
+
+    const riskKey = data.itemId || `${data.transcript || ""}:${data.title || ""}`;
+    if (riskKey && riskKey === lastForwardedRiskKey) return;
+    lastForwardedRiskKey = riskKey;
+
+    const speaker = data.speaker || data.fromName || "발화자";
+    const transcript = (data.transcript || "").trim();
+    const basis = (data.basis || []).slice(0, 3).join("\n- ");
+    const laws = (data.laws || []).slice(0, 3).join(", ");
+
+    const message =
+      `[리스크 자동 연동]\n` +
+      `발화자: ${speaker}\n` +
+      (transcript ? `전사: ${transcript}\n` : "") +
+      `\n탐지된 리스크:\n` +
+      `- 제목: ${data.title || "—"}\n` +
+      `- 요약: ${data.summary || "—"}\n` +
+      `- 심각도: ${data.severity || "medium"} (점수 ${Math.round(Number(data.score) || 0)})\n` +
+      (basis ? `- 근거:\n- ${basis}\n` : "") +
+      (laws ? `- 관련 법령: ${laws}\n` : "") +
+      `\n위 발언과 리스크에 대해 선택된 관할국 기준으로 법률·컴플라이언스 조언을 정리해 주세요.`;
+
+    appendLegalSystemMessage("리스크 탐지 발언이 법률 AI에 자동 전달되었습니다.");
+    appendLegalMessage("user", `[자동] ${data.title || "리스크 분석"}`);
+    legalHistory.push({ role: "user", content: message });
+    legalBusy = true;
+    send({ type: "legal-query", message, ...getLegalPayload(), history: legalHistory.slice(0, -1) });
   }
 
   function setAlternativesLoading(active) {

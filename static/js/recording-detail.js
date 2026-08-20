@@ -50,6 +50,18 @@ function statusLabel(status) {
   return map[status] || status;
 }
 
+async function fetchJson(url, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { credentials: "same-origin", signal: controller.signal });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function playTrack(track) {
   if (!track?.chunks?.length) {
     player.removeAttribute("src");
@@ -189,36 +201,31 @@ function showError(msg) {
 
 async function load() {
   try {
-    const res = await fetch(`/api/recordings/${cfg.roomId}/${cfg.sessionId}/`);
-    if (res.ok) {
-      const data = await res.json();
+    const { res, data } = await fetchJson(`/api/recordings/${cfg.roomId}/${cfg.sessionId}/`);
+    if (res.ok && data.recording) {
       showRecording(data.recording);
       return;
     }
-
-    if (res.status === 503) {
-      const rec = await getRecordingDetailClient(firebaseConfig, cfg.roomId, cfg.sessionId);
-      if (!rec) {
-        showError("녹화본을 찾을 수 없거나 접근 권한이 없습니다.");
-        return;
-      }
-      showRecording(rec);
+    if (res.status === 404) {
+      showError(data.error || "녹화본을 찾을 수 없습니다.");
       return;
     }
-
-    const data = await res.json();
-    showError(data.error || "녹화본을 불러오지 못했습니다.");
   } catch (err) {
-    try {
-      const rec = await getRecordingDetailClient(firebaseConfig, cfg.roomId, cfg.sessionId);
-      if (!rec) {
-        showError("녹화본을 찾을 수 없거나 접근 권한이 없습니다.");
-        return;
-      }
-      showRecording(rec);
-    } catch (clientErr) {
-      showError(clientErr.message || "연결에 실패했습니다.");
+    if (err.name === "AbortError") {
+      showError("서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.");
+      return;
     }
+  }
+
+  try {
+    const rec = await getRecordingDetailClient(firebaseConfig, cfg.roomId, cfg.sessionId);
+    if (!rec) {
+      showError("녹화본을 찾을 수 없거나 접근 권한이 없습니다.");
+      return;
+    }
+    showRecording(rec);
+  } catch (clientErr) {
+    showError(clientErr.message || "녹화본을 불러오지 못했습니다.");
   }
 }
 

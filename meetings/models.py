@@ -77,3 +77,29 @@ class LegalReference(models.Model):
 
     def __str__(self):
         return f"{self.country_code} · {self.title}"
+
+
+class RecordingSession(models.Model):
+    """Server-side recording metadata (Firestore fallback)."""
+
+    session_id = models.CharField(max_length=128, unique=True, db_index=True)
+    room_id = models.UUIDField(db_index=True)
+    room_name = models.CharField(max_length=100, blank=True)
+    owner_uid = models.CharField(max_length=128, db_index=True)
+    owner_name = models.CharField(max_length=120, blank=True)
+    status = models.CharField(max_length=20, default="recording")
+    started_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    duration_sec = models.PositiveIntegerField(default=0)
+    videos = models.JSONField(default=dict)
+    participants = models.JSONField(default=list)
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [
+            models.Index(fields=["owner_uid", "-started_at"]),
+            models.Index(fields=["room_id", "session_id"]),
+        ]
+
+    def __str__(self):
+        return f"{self.room_name or self.room_id} · {self.session_id[:8]}"
