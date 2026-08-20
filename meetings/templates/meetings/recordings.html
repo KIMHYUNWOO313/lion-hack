@@ -1,0 +1,42 @@
+{% extends "meetings/base.html" %}
+{% load static %}
+
+{% block title %}녹화본 - Lion Meet{% endblock %}
+
+{% block extra_head %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  .recordings-page {
+    background: url("{% static 'images/background.png' %}") no-repeat center center / cover;
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="recordings-page">
+  <nav class="home-nav">
+    <a href="/" class="home-brand">Lion Meet</a>
+    <div class="home-nav-auth">
+      <a href="/" class="zm-btn zm-btn-outline zm-btn-sm">홈으로</a>
+    </div>
+  </nav>
+
+  <section class="recordings-main">
+    <header class="recordings-header">
+      <h1>회의 녹화본</h1>
+    </header>
+
+    <div id="recordings-loading" class="recordings-state">불러오는 중…</div>
+    <div id="recordings-error" class="recordings-state recordings-error hidden"></div>
+    <div id="recordings-empty" class="recordings-state hidden">
+      <p>저장된 녹화본이 없습니다.</p>
+      <p class="recordings-hint">회의에 참가하면 자동으로 녹화가 시작됩니다.</p>
+    </div>
+    <div id="recordings-list" class="recordings-list hidden"></div>
+  </section>
+</div>
+
+{{ firebase_config|json_script:"firebase-config" }}
+<script type="module" src="{% static 'js/recordings.js' %}"></script>
+{% endblock %}

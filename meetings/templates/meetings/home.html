@@ -1,0 +1,222 @@
+{% extends "meetings/base.html" %}
+{% load static %}
+
+{% block title %}Lion Meet - 화상회의{% endblock %}
+
+{% block extra_head %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  .home-page {
+    background: url("{% static 'images/background.png' %}") no-repeat center center / cover;
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="home-page">
+  <nav class="home-nav">
+    <div class="home-brand">Lion Meet</div>
+    <div id="nav-auth" class="home-nav-auth"></div>
+  </nav>
+
+  <section class="home-hero">
+    <h1>어디서나, 함께</h1>
+    <p>HD 화상회의와 AI 법률·세무 자문으로 더 안전한 국제 미팅을 시작하세요.</p>
+
+    <div class="home-actions">
+      <button id="create-room-btn" class="zm-btn zm-btn-primary">새 회의</button>
+      <button id="show-join-btn" class="zm-btn zm-btn-outline">회의 참가</button>
+      <a href="/recordings/" id="recordings-link" class="zm-btn zm-btn-outline hidden">녹화본</a>
+    </div>
+  </section>
+</div>
+
+<!-- Auth modal -->
+<div id="auth-modal" class="home-modal hidden">
+  <div class="home-modal-box">
+    <h2 id="auth-modal-title">로그인</h2>
+    <p class="home-modal-desc">회의를 시작하거나 참가하려면 로그인이 필요합니다.</p>
+    <div id="auth-name-row" class="hidden">
+      <input type="text" id="auth-name" class="zm-input" placeholder="이름 (선택)" maxlength="60" autocomplete="name">
+    </div>
+    <input type="email" id="auth-email" class="zm-input" placeholder="이메일" autocomplete="email">
+    <input type="password" id="auth-password" class="zm-input" placeholder="비밀번호 (6자 이상)" autocomplete="current-password">
+    <p id="auth-error" class="zm-join-error hidden"></p>
+    <button id="auth-submit-btn" class="zm-btn zm-btn-primary" style="width:100%">로그인</button>
+    <p class="auth-switch-row">
+      <span id="auth-switch-text">계정이 없으신가요?</span>
+      <button type="button" id="auth-switch-btn" class="auth-link-btn">회원가입</button>
+    </p>
+    <button type="button" id="close-auth-btn" class="zm-btn zm-btn-outline" style="width:100%;margin-top:0.5rem">닫기</button>
+  </div>
+</div>
+
+<!-- Join modal -->
+<div id="join-modal" class="home-modal hidden">
+  <div class="home-modal-box">
+    <h2>회의 참가</h2>
+    <p class="home-modal-desc">호스트가 알려준 6자리 회의 코드를 입력하세요</p>
+    <input type="text" id="join-room-id" class="zm-input zm-code-input" placeholder="000-000" maxlength="7" inputmode="numeric" autocomplete="off">
+    <p id="join-error" class="zm-join-error hidden"></p>
+    <div style="display:flex;gap:0.5rem;">
+      <button id="join-room-btn" class="zm-btn zm-btn-primary" style="flex:1">참가</button>
+      <button id="close-modal-btn" class="zm-btn zm-btn-outline">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- Create modal -->
+<div id="create-modal" class="home-modal hidden">
+  <div class="home-modal-box">
+    <h2>새 회의 만들기</h2>
+    <input type="text" id="room-name" class="zm-input" placeholder="회의 이름 (선택)" maxlength="100">
+    <div style="display:flex;gap:0.5rem;">
+      <button id="confirm-create-btn" class="zm-btn zm-btn-primary" style="flex:1">만들기</button>
+      <button id="close-create-btn" class="zm-btn zm-btn-outline">취소</button>
+    </div>
+  </div>
+</div>
+
+{{ firebase_config|json_script:"firebase-config" }}
+
+<script type="module">
+import { createFirebaseAuth } from "{% static 'js/firebase-auth.js' %}";
+
+function getCookie(name) {
+  const v = `; ${document.cookie}`;
+  const p = v.split(`; ${name}=`);
+  if (p.length === 2) return p.pop().split(';').shift();
+  return '';
+}
+
+const firebaseConfig = JSON.parse(document.getElementById('firebase-config').textContent);
+const authApi = createFirebaseAuth(firebaseConfig);
+await authApi.refreshMe();
+
+const params = new URLSearchParams(window.location.search);
+if (params.get('login') === '1' && !authApi.isAuthenticated()) {
+  authApi.openAuthModal('login');
+}
+
+document.getElementById('show-join-btn').addEventListener('click', () => {
+  authApi.requireAuth(() => {
+    document.getElementById('join-modal').classList.remove('hidden');
+    document.getElementById('join-error').classList.add('hidden');
+    document.getElementById('join-room-id').value = '';
+    document.getElementById('join-room-id').focus();
+  });
+});
+
+document.getElementById('close-modal-btn').addEventListener('click', () => {
+  document.getElementById('join-modal').classList.add('hidden');
+});
+
+document.getElementById('create-room-btn').addEventListener('click', () => {
+  authApi.requireAuth(() => {
+    document.getElementById('create-modal').classList.remove('hidden');
+    document.getElementById('room-name').focus();
+  });
+});
+
+document.getElementById('close-create-btn').addEventListener('click', () => {
+  document.getElementById('create-modal').classList.add('hidden');
+});
+
+document.getElementById('join-room-id').addEventListener('input', (e) => {
+  let v = e.target.value.replace(/\D/g, '').slice(0, 6);
+  if (v.length > 3) v = v.slice(0, 3) + '-' + v.slice(3);
+  e.target.value = v;
+});
+
+let joinCodeComposing = false;
+let joinCodeBlockEnter = 0;
+const joinInput = document.getElementById('join-room-id');
+joinInput.addEventListener('compositionstart', () => { joinCodeComposing = true; });
+joinInput.addEventListener('compositionend', () => {
+  joinCodeComposing = false;
+  joinCodeBlockEnter = Date.now() + 80;
+});
+joinInput.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  if (joinCodeComposing || e.isComposing || e.keyCode === 229) return;
+  if (Date.now() < joinCodeBlockEnter) return;
+  document.getElementById('join-room-btn').click();
+});
+
+document.getElementById('join-room-btn').addEventListener('click', async () => {
+  const raw = document.getElementById('join-room-id').value.replace(/\D/g, '');
+  const errEl = document.getElementById('join-error');
+  errEl.classList.add('hidden');
+
+  if (raw.length !== 6) {
+    errEl.textContent = '6자리 회의 코드를 입력하세요.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  const btn = document.getElementById('join-room-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/rooms/join/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+      body: JSON.stringify({ code: raw }),
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      document.getElementById('join-modal').classList.add('hidden');
+      authApi.openAuthModal('login', () => document.getElementById('show-join-btn').click());
+      btn.disabled = false;
+      return;
+    }
+    if (!res.ok) {
+      errEl.textContent = data.error || '회의를 찾을 수 없습니다.';
+      errEl.classList.remove('hidden');
+      btn.disabled = false;
+      return;
+    }
+    window.location.href = `/room/${data.room_id}/`;
+  } catch (e) {
+    errEl.textContent = '연결에 실패했습니다.';
+    errEl.classList.remove('hidden');
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('confirm-create-btn').addEventListener('click', async () => {
+  const name = document.getElementById('room-name').value.trim();
+  const btn = document.getElementById('confirm-create-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/rooms/create/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+      body: JSON.stringify({ name }),
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      document.getElementById('create-modal').classList.add('hidden');
+      authApi.openAuthModal('login', () => document.getElementById('create-room-btn').click());
+      btn.disabled = false;
+      return;
+    }
+    if (!res.ok) {
+      alert(data.error || '회의 생성에 실패했습니다.');
+      btn.disabled = false;
+      return;
+    }
+    window.location.href = `/room/${data.room_id}/`;
+  } catch (e) {
+    alert('회의 생성에 실패했습니다.');
+    btn.disabled = false;
+  }
+});
+
+document.querySelectorAll('.home-modal').forEach(modal => {
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.classList.add('hidden');
+  });
+});
+</script>
+{% endblock %}

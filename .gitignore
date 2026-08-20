@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.pem
+.env*
+venv/
+.venv/
+*firebase-adminsdk*.json
+*serviceAccount*.json
+db.sqlite3
+staticfiles/
+*.log
+.DS_Store
+Thumbs.db
+.cursor/

@@ -1,0 +1,66 @@
+{% extends "meetings/base.html" %}
+{% load static %}
+
+{% block title %}녹화 재생 - Lion Meet{% endblock %}
+
+{% block extra_head %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  .recording-detail-page {
+    background: url("{% static 'images/background.png' %}") no-repeat center center / cover;
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="recording-detail-page">
+  <nav class="home-nav">
+    <a href="/recordings/" class="home-brand">Lion Meet</a>
+    <div class="home-nav-auth">
+      <a href="/recordings/" class="zm-btn zm-btn-outline zm-btn-sm">목록으로</a>
+    </div>
+  </nav>
+
+  <section class="recording-detail-main">
+    <div id="detail-loading" class="recordings-state">녹화본 불러오는 중…</div>
+    <div id="detail-error" class="recordings-state recordings-error hidden"></div>
+
+    <div id="detail-content" class="hidden">
+      <header class="recording-detail-header">
+        <h1 id="detail-title">회의 녹화</h1>
+        <div class="recording-detail-meta">
+          <span id="detail-date"></span>
+          <span id="detail-duration"></span>
+          <span id="detail-status" class="rec-status-pill"></span>
+        </div>
+      </header>
+
+      <div class="recording-detail-grid">
+        <div class="recording-player-panel">
+          <div class="recording-track-tabs" id="track-tabs"></div>
+          <div class="recording-video-wrap">
+            <video id="recording-player" class="recording-video" controls playsinline></video>
+            <p id="chunk-indicator" class="recording-chunk-indicator hidden"></p>
+          </div>
+        </div>
+
+        <aside class="recording-side-panel">
+          <div class="recording-side-tabs">
+            <button type="button" class="recording-side-tab active" data-tab="chat">채팅</button>
+            <button type="button" class="recording-side-tab" data-tab="transcripts">전사</button>
+          </div>
+          <div id="side-chat" class="recording-side-content"></div>
+          <div id="side-transcripts" class="recording-side-content hidden"></div>
+        </aside>
+      </div>
+    </div>
+  </section>
+</div>
+
+{{ firebase_config|json_script:"firebase-config" }}
+<script type="application/json" id="recording-detail-meta">
+{"roomId":"{{ room_id }}","sessionId":"{{ session_id }}"}
+</script>
+<script type="module" src="{% static 'js/recording-detail.js' %}"></script>
+{% endblock %}

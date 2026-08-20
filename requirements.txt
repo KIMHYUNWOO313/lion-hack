@@ -1,0 +1,8 @@
+Django>=5.0,<6.0
+channels>=4.0,<5.0
+daphne>=4.0,<5.0
+python-dotenv>=1.0,<2.0
+websockets>=13.0,<14.0
+whitenoise>=6.6,<7.0
+PyJWT[crypto]>=2.8,<3.0
+firebase-admin>=6.5,<7.0

@@ -1,0 +1,266 @@
+{% extends "meetings/base.html" %}
+{% load static %}
+
+{% block title %}{{ room.name }} - Lion Meet{% endblock %}
+
+{% block extra_head %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% endblock %}
+
+{% block body %}
+<div class="zm-app" id="meeting-app">
+
+  <!-- Pre-join lobby -->
+  <div id="lobby" class="zm-lobby">
+    <div class="zm-lobby-inner">
+        <div class="zm-lobby-preview-wrap">
+        <video id="lobby-preview" class="zm-lobby-video" autoplay playsinline muted></video>
+        <div id="media-permission-prompt" class="zm-media-prompt">
+          <svg class="zm-icon lg" viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+          <p>카메라와 마이크를 사용하려면<br>아래 버튼을 눌러 허용해 주세요</p>
+          <button id="enable-media-btn" type="button" class="zm-btn-media">카메라 · 마이크 허용</button>
+          <p id="media-error-msg" class="zm-media-error hidden"></p>
+        </div>
+        <div class="zm-lobby-preview-controls hidden" id="lobby-media-controls">
+          <button id="toggle-lobby-audio" class="zm-circle-btn" title="마이크">
+            <svg class="zm-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5-3c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+          </button>
+          <button id="toggle-lobby-video" class="zm-circle-btn" title="카메라">
+            <svg class="zm-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="zm-lobby-panel">
+        <div class="zm-lobby-brand">
+          <svg class="zm-logo-svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#2D8CFF"/><path d="M8 12h6v8H8v-8zm10 0h6v8h-6v-8z" fill="#fff"/></svg>
+          <span>Lion Meet</span>
+        </div>
+        <h1 class="zm-lobby-title">{{ room.name }}</h1>
+        <p class="zm-lobby-sub">회의에 참가할 준비가 되셨나요?</p>
+        <label class="zm-label">표시 이름</label>
+        <input type="text" id="participant-name" class="zm-input" placeholder="이름을 입력하세요" maxlength="50">
+        <button id="join-meeting-btn" class="zm-btn-join" disabled>참가</button>
+
+        <div class="zm-join-code-box">
+          <span class="zm-join-code-label">회의 참가 코드</span>
+          <div class="zm-join-code-row">
+            <span class="zm-join-code" id="display-join-code">{{ join_code_display }}</span>
+            <button id="copy-code-btn" class="zm-link-btn" type="button">복사</button>
+          </div>
+          <p class="zm-room-id-hint">다른 사람에게 이 코드를 알려주세요</p>
+        </div>
+        <p class="zm-room-id">링크: <button id="copy-link-btn" class="zm-link-btn" type="button">복사</button></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Meeting room -->
+  <div id="meeting-room" class="zm-meeting hidden">
+    <div class="zm-topbar">
+      <div class="zm-topbar-left">
+        <svg class="zm-logo-svg sm" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#2D8CFF"/><path d="M8 12h6v8H8v-8zm10 0h6v8h-6v-8z" fill="#fff"/></svg>
+        <span class="zm-topbar-title" id="meeting-name">{{ room.name }}</span>
+        <div class="zm-topbar-code-pill" title="다른 사람에게 이 코드를 알려주세요">
+          <span class="zm-topbar-code-label">참가 코드</span>
+          <span class="zm-topbar-code" id="meeting-join-code">{{ join_code_display }}</span>
+          <button id="copy-meeting-code-btn" class="zm-topbar-code-copy" type="button">복사</button>
+        </div>
+        <span class="zm-topbar-divider">|</span>
+        <span class="zm-topbar-timer" id="meeting-timer">00:00</span>
+        <span id="recording-badge" class="zm-recording-badge hidden" title="회의 녹화 중">
+          <span class="zm-rec-dot"></span> REC
+        </span>
+      </div>
+      <div class="zm-topbar-right">
+        <span class="zm-badge" id="participant-count">1</span>
+        <span id="connection-status" class="zm-conn-dot online"></span>
+      </div>
+    </div>
+
+    <div class="zm-main" id="zm-main">
+      <div class="zm-video-area">
+        <div id="video-grid" class="zm-video-grid"></div>
+        <div id="screen-share-banner" class="zm-screen-banner hidden">
+          <svg class="zm-icon sm" viewBox="0 0 24 24" fill="currentColor"><path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4z"/></svg>
+          <span id="screen-sharer-name"></span>님이 화면을 공유 중
+        </div>
+        <div id="legal-alert-stack" class="zm-legal-alert-stack"></div>
+      </div>
+
+      <div id="drawer-resizer" class="zm-drawer-resizer" aria-hidden="true" title="드래그하여 크기 조절"></div>
+
+      <!-- Side panel (참가자 · 채팅 · 법률 AI) -->
+      <aside id="drawer" class="zm-drawer" aria-hidden="true">
+      <header class="zm-drawer-head">
+        <h2 id="drawer-title" class="zm-drawer-title">참가자</h2>
+        <button id="close-drawer" class="zm-close-btn" type="button" aria-label="닫기">&times;</button>
+      </header>
+      <nav class="zm-drawer-tabs">
+        <button class="zm-tab active" data-tab="participants" type="button">참가자</button>
+        <button class="zm-tab" data-tab="risk" type="button">리스크</button>
+        <button class="zm-tab" data-tab="chat" type="button">채팅</button>
+        <button class="zm-tab" data-tab="legal" type="button">법률 AI</button>
+      </nav>
+      <div class="zm-drawer-body">
+        <div id="tab-participants" class="zm-tab-panel active">
+          <ul id="participants-list" class="zm-participants-list"></ul>
+        </div>
+        <div id="tab-risk" class="zm-tab-panel">
+          <div class="zm-risk-monitor">
+            <div class="zm-risk-head">
+              <span class="zm-risk-live-dot" id="stt-status-dot"></span>
+              <span id="stt-status-text">음성 인식 대기</span>
+            </div>
+            <section class="zm-risk-section zm-script-section">
+              <h3 class="zm-risk-section-title">실시간 전체 스크립트</h3>
+              <ul id="speech-feed" class="zm-speech-feed">
+                <li class="zm-speech-empty">회의 발언 전체가 실시간으로 전사됩니다</li>
+              </ul>
+            </section>
+            <section class="zm-risk-section">
+              <h3 class="zm-risk-section-title">리스크 탐지 결과</h3>
+              <div id="risk-alert-box" class="zm-risk-alert idle">
+                <div class="zm-risk-alert-main">
+                  <span class="zm-risk-alert-label">위반 가능성</span>
+                  <strong id="risk-severity-label">—</strong>
+                </div>
+                <p id="risk-category" class="zm-risk-category">아직 탐지된 리스크가 없습니다</p>
+                <div class="zm-risk-score-row">
+                  <span>점수</span>
+                  <strong id="risk-score">0</strong>
+                </div>
+              </div>
+            </section>
+            <section class="zm-risk-section">
+              <h3 class="zm-risk-section-title">위험 구간</h3>
+              <div class="zm-wave-wrap">
+                <canvas id="risk-waveform" width="320" height="56" aria-hidden="true"></canvas>
+                <div class="zm-wave-times">
+                  <span id="risk-window-start">00:00:00</span>
+                  <span id="risk-window-end">00:00:00</span>
+                </div>
+              </div>
+            </section>
+            <section class="zm-risk-section">
+              <h3 class="zm-risk-section-title">탐지 근거</h3>
+              <ul id="risk-basis-list" class="zm-risk-basis-list">
+                <li class="zm-risk-basis-empty">법률 리스크 근거가 표시됩니다</li>
+              </ul>
+            </section>
+          </div>
+        </div>
+        <div id="tab-chat" class="zm-tab-panel">
+          <div id="chat-messages" class="zm-chat-msgs">
+            <div id="chat-empty" class="zm-chat-empty">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+              <p>아직 메시지가 없습니다</p>
+              <span>회의 중 궁금한 점을 채팅으로 남겨보세요</span>
+            </div>
+          </div>
+          <div class="zm-chat-compose">
+            <input type="text" id="chat-input" class="zm-chat-input-field" placeholder="메시지를 입력하세요..." maxlength="500" autocomplete="off">
+            <button id="send-chat-btn" class="zm-send-btn" type="button" aria-label="전송">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="tab-legal" class="zm-tab-panel">
+          <div class="zm-legal-setup">
+            <div class="zm-legal-country-row">
+              <div class="zm-legal-field">
+                <label class="zm-label" for="legal-my-country">우리 국가</label>
+                <select id="legal-my-country" class="zm-select zm-select-sm"></select>
+              </div>
+              <div class="zm-legal-field">
+                <label class="zm-label" for="legal-partner-country">상대 국가</label>
+                <select id="legal-partner-country" class="zm-select zm-select-sm">
+                  <option value="">선택</option>
+                </select>
+              </div>
+            </div>
+            <input type="text" id="legal-context" class="zm-legal-context-input" maxlength="1000" placeholder="미팅 맥락 (선택) — 예: 미국 SaaS B2B 계약 협상">
+            <button id="legal-quick-check" class="zm-btn-legal-quick" type="button">리스크 점검</button>
+          </div>
+          <div id="legal-chat" class="zm-legal-chat"></div>
+          <div class="zm-legal-compose">
+            <input type="text" id="legal-input" class="zm-legal-input" maxlength="2000" placeholder="법률·세무 질문..." autocomplete="off">
+            <button id="legal-send-btn" class="zm-send-btn" type="button" aria-label="전송">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+          </div>
+          <p class="zm-legal-footnote">일반 정보 제공용 · formal legal advice 아님</p>
+        </div>
+      </div>
+      </aside>
+    </div>
+
+    <!-- Floating bottom toolbar -->
+    <div class="zm-toolbar-wrap">
+      <div class="zm-toolbar">
+        <button id="toggle-audio" class="zm-tool-btn" title="음소거">
+          <svg class="zm-icon tool" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5-3c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+          <span class="zm-tool-label">음소거</span>
+        </button>
+        <button id="toggle-video" class="zm-tool-btn" title="비디오">
+          <svg class="zm-icon tool" viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+          <span class="zm-tool-label">비디오</span>
+        </button>
+        <button id="toggle-screen" class="zm-tool-btn" title="화면 공유">
+          <svg class="zm-icon tool" viewBox="0 0 24 24" fill="currentColor"><path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4z"/></svg>
+          <span class="zm-tool-label">공유</span>
+        </button>
+        <div class="zm-tool-sep"></div>
+        <button id="toggle-risk" class="zm-tool-btn" title="리스크 모니터">
+          <svg class="zm-icon tool" viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+          <span class="zm-tool-label">리스크</span>
+        </button>
+        <button id="toggle-legal" class="zm-tool-btn" title="법률·세무 AI">
+          <svg class="zm-icon tool" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+          <span class="zm-tool-label">법률 AI</span>
+        </button>
+        <button id="toggle-chat" class="zm-tool-btn" title="채팅">
+          <svg class="zm-icon tool" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+          <span class="zm-tool-label">채팅</span>
+        </button>
+        <button id="toggle-sidebar" class="zm-tool-btn" title="참가자">
+          <svg class="zm-icon tool" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+          <span class="zm-tool-label">참가자</span>
+        </button>
+        <div class="zm-tool-sep"></div>
+        <button id="leave-meeting" class="zm-tool-btn zm-leave" title="나가기">
+          <svg class="zm-icon tool" viewBox="0 0 24 24" fill="currentColor"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.996.996 0 010-1.41l2.72-2.72c.18-.18.43-.29.71-.29.27 0 .52.1.7.27.79.73 1.68 1.36 2.66 1.85.33.16.56.51.56.9v3.1c1.45-.47 3-.72 4.6-.72s3.15.25 4.6.72v-3.1c0-.39.23-.74.56-.9.98-.49 1.87-1.12 2.66-1.85.18-.18.43-.27.7-.27.28 0 .53.11.71.29l2.72 2.72c.2.2.2.51 0 .71l-2.72 2.72a.996.996 0 01-1.41 0c-.79-.73-1.68-1.36-2.66-1.85a.996.996 0 01-.56-.9v-3.1A14.04 14.04 0 0012 9z"/></svg>
+          <span class="zm-tool-label">나가기</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{{ firebase_config|json_script:"firebase-config" }}
+<script>
+  window.MEETING_CONFIG = {
+    roomId: "{{ room_id }}",
+    roomName: "{{ room.name|escapejs }}",
+    joinCode: "{{ join_code }}",
+    joinCodeDisplay: "{{ join_code_display }}",
+    iceServers: {{ ice_servers_json|safe }},
+    wsUrl: `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/meeting/{{ room_id }}/`,
+    stt: {
+      model: "{{ stt_model|escapejs }}",
+      boostGain: {{ stt_boost_gain }},
+      pcmProcessorUrl: "{% static 'js/pcm-processor.js' %}",
+    },
+    firebase: JSON.parse(document.getElementById("firebase-config").textContent),
+    firebaseAdminEnabled: {{ firebase_admin_enabled|yesno:"true,false" }},
+  };
+</script>
+<script type="module">
+  import { createMeetingRecorder } from "{% static 'js/firebase-recording.js' %}";
+
+  window.MeetingRecorderFactory = createMeetingRecorder;
+  window.dispatchEvent(new Event("meeting-recorder-ready"));
+</script>
+<script src="{% static 'js/markdown-lite.js' %}"></script>
+<script src="{% static 'js/room.js' %}"></script>
+{% endblock %}
