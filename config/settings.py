@@ -113,7 +113,7 @@ STT_NOISE_REDUCTION = os.getenv("STT_NOISE_REDUCTION", "")
 STT_MIN_LEVEL = os.getenv("STT_MIN_LEVEL", "0.001")
 STT_MAX_GAIN = float(os.getenv("STT_MAX_GAIN", "1.0"))
 
-# Firebase Auth (client config is public; token verified server-side)
+# Firebase Auth (client config — set via .env; do not hardcode API keys in source)
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "lion-hack-ff862")
 FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY", "")
 FIREBASE_AUTH_DOMAIN = os.getenv("FIREBASE_AUTH_DOMAIN", "lion-hack-ff862.firebaseapp.com")
